@@ -1,6 +1,11 @@
 import AppKit
 import UniformTypeIdentifiers
 
+/// 原点を左上にするビュー。NSScrollView に縦積みの設定項目を載せるために使う。
+private final class FlippedView: NSView {
+    override var isFlipped: Bool { true }
+}
+
 final class SettingsWindowController: NSWindowController {
     private let settings: TickerSettings
     private let monitor: NotificationMonitor
@@ -10,9 +15,13 @@ final class SettingsWindowController: NSWindowController {
     private let speedValue = NSTextField(labelWithString: "")
     private let fontValue = NSTextField(labelWithString: "")
     private let earthquakeStatusLabel = NSTextField(labelWithString: "")
+    private let earthquakeIntensityPopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let earthquakeSoundPopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let earthquakeLoopCheckbox = NSButton(checkboxWithTitle: "この音をループ再生", target: nil, action: nil)
     private let edgePopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let displayPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let soundPopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let soundLoopCheckbox = NSButton(checkboxWithTitle: "", target: nil, action: nil)
     private let fontPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let quietHoursCheckbox = NSButton()
     private let quietStartPicker = NSDatePicker()
@@ -23,17 +32,25 @@ final class SettingsWindowController: NSWindowController {
     var onTest: (() -> Void)?
     var onTestSound: (() -> Void)?
     var onShowFeeds: (() -> Void)?
+    /// 効果音を選び直したときの試聴。
+    var onPreviewSound: ((String) -> Void)?
 
     init(settings: TickerSettings, monitor: NotificationMonitor) {
         self.settings = settings
         self.monitor = monitor
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 520, height: 775),
-            styleMask: [.titled, .closable],
+            styleMask: [.titled, .closable, .resizable],
             backing: .buffered,
             defer: false
         )
         window.title = "通知ティッカー設定"
+        window.minSize = NSSize(width: 520, height: 420)
+        // 項目が増えて画面に収まらない場合に備え、可視領域より高くしない。
+        if let visible = NSScreen.main?.visibleFrame {
+            let height = min(775, visible.height - 40)
+            window.setContentSize(NSSize(width: 520, height: height))
+        }
         window.center()
         window.isReleasedWhenClosed = false
         super.init(window: window)
@@ -116,8 +133,8 @@ final class SettingsWindowController: NSWindowController {
         )
         updateFontLabel()
 
-        fontPopup.addItem(withTitle: "エヴァ風・極太明朝")
-        fontPopup.lastItem?.representedObject = TickerSettings.evaMinchoFontFamily
+        fontPopup.addItem(withTitle: "極太明朝")
+        fontPopup.lastItem?.representedObject = TickerSettings.boldMinchoFontFamily
         fontPopup.addItem(withTitle: "システム標準")
         fontPopup.lastItem?.representedObject = "__system__"
         for family in NSFontManager.shared.availableFontFamilies.sorted(by: {
@@ -176,14 +193,45 @@ final class SettingsWindowController: NSWindowController {
         updateQuietHoursUI()
 
         let earthquakeEnabled = NSButton(
-            checkboxWithTitle: "震度4以上の地震を津波情報付きで表示",
+            checkboxWithTitle: "地震を津波情報付きで表示",
             target: self,
             action: #selector(earthquakeEnabledChanged(_:))
         )
         earthquakeEnabled.state = settings.earthquakeAlertsEnabled ? .on : .off
-        earthquakeStatusLabel.stringValue = settings.earthquakeAlertsEnabled ? "震度4以上を監視中" : "地震速報は停止中"
         earthquakeStatusLabel.textColor = .secondaryLabelColor
         earthquakeStatusLabel.alignment = .right
+
+        earthquakeIntensityPopup.removeAllItems()
+        for intensity in JMAEarthquakeReport.selectableIntensities {
+            earthquakeIntensityPopup.addItem(withTitle: "震度\(intensity)以上")
+            earthquakeIntensityPopup.lastItem?.representedObject = intensity
+        }
+        earthquakeIntensityPopup.target = self
+        earthquakeIntensityPopup.action = #selector(earthquakeIntensityChanged(_:))
+        selectCurrentEarthquakeIntensity()
+        let earthquakeIntensityRow = makePopupRow(label: "地震の下限震度", popup: earthquakeIntensityPopup)
+
+        earthquakeSoundPopup.target = self
+        earthquakeSoundPopup.action = #selector(earthquakeSoundChanged(_:))
+        earthquakeLoopCheckbox.target = self
+        earthquakeLoopCheckbox.action = #selector(earthquakeLoopChanged(_:))
+        reloadEarthquakeSoundPopup()
+        let earthquakeSoundRow = NSStackView(views: [
+            {
+                let label = NSTextField(labelWithString: "地震の効果音")
+                label.widthAnchor.constraint(equalToConstant: 120).isActive = true
+                return label
+            }(),
+            earthquakeSoundPopup,
+            earthquakeLoopCheckbox
+        ])
+        earthquakeSoundRow.orientation = .horizontal
+        earthquakeSoundRow.alignment = .centerY
+        earthquakeSoundRow.distribution = .fill
+        earthquakeSoundRow.spacing = 10
+        earthquakeSoundPopup.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        updateEarthquakeUI()
+
         let earthquakeRow = NSStackView(views: [earthquakeEnabled, earthquakeStatusLabel])
         earthquakeRow.orientation = .horizontal
         earthquakeRow.alignment = .centerY
@@ -201,11 +249,16 @@ final class SettingsWindowController: NSWindowController {
         soundPopup.action = #selector(soundChanged(_:))
         reloadSoundPopup()
 
+        soundLoopCheckbox.title = "この音をループ再生"
+        soundLoopCheckbox.target = self
+        soundLoopCheckbox.action = #selector(soundLoopChanged(_:))
+        updateSoundLoopCheckbox()
+
         let soundTestButton = NSButton(title: "音を試す", target: self, action: #selector(testSound))
         soundTestButton.bezelStyle = .rounded
         let soundLabel = NSTextField(labelWithString: "通知音")
         soundLabel.widthAnchor.constraint(equalToConstant: 120).isActive = true
-        let soundRow = NSStackView(views: [soundLabel, soundPopup, soundTestButton])
+        let soundRow = NSStackView(views: [soundLabel, soundPopup, soundLoopCheckbox, soundTestButton])
         soundRow.orientation = .horizontal
         soundRow.alignment = .centerY
         soundRow.distribution = .fill
@@ -250,25 +303,47 @@ final class SettingsWindowController: NSWindowController {
         let stack = NSStackView(views: [
             title, header, separator(), edgeRow, displayRow,
             opacity, speed, fontFamilyRow, font, clickThrough, ignoreClockWeatherWidgets,
-            separator(), quietHoursCheckbox, quietTimeRow, earthquakeRow,
+            separator(), quietHoursCheckbox, quietTimeRow, earthquakeRow, earthquakeIntensityRow,
+            earthquakeSoundRow,
             soundEnabled, soundRow, importSoundButton, bottomRow
         ])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 15
         stack.translatesAutoresizingMaskIntoConstraints = false
-        content.addSubview(stack)
+
+        // 設定項目が増えてウィンドウ高を超えても全項目に到達できるようスクロールさせる。
+        // 反転させないと NSScrollView は下端起点になり、先頭が隠れる。
+        let documentView = FlippedView()
+        documentView.translatesAutoresizingMaskIntoConstraints = false
+        documentView.addSubview(stack)
+
+        let scrollView = NSScrollView()
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.hasVerticalScroller = true
+        scrollView.drawsBackground = false
+        scrollView.autohidesScrollers = true
+        scrollView.documentView = documentView
+        content.addSubview(scrollView)
 
         NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 24),
-            stack.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -24),
-            stack.topAnchor.constraint(equalTo: content.topAnchor, constant: 22),
+            scrollView.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+            scrollView.topAnchor.constraint(equalTo: content.topAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: content.bottomAnchor),
+            documentView.widthAnchor.constraint(equalTo: scrollView.contentView.widthAnchor),
+            documentView.bottomAnchor.constraint(equalTo: stack.bottomAnchor, constant: 22),
+            stack.leadingAnchor.constraint(equalTo: documentView.leadingAnchor, constant: 24),
+            stack.trailingAnchor.constraint(equalTo: documentView.trailingAnchor, constant: -24),
+            stack.topAnchor.constraint(equalTo: documentView.topAnchor, constant: 22),
             opacity.widthAnchor.constraint(equalTo: stack.widthAnchor),
             speed.widthAnchor.constraint(equalTo: stack.widthAnchor),
             font.widthAnchor.constraint(equalTo: stack.widthAnchor),
             fontFamilyRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
             quietTimeRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
             earthquakeRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            earthquakeIntensityRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            earthquakeSoundRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
             edgeRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
             displayRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
             soundRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
@@ -345,6 +420,16 @@ final class SettingsWindowController: NSWindowController {
         names.insert(settings.soundName)
         names.insert("Glass")
         return names.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+    }
+
+    /// ループ設定は音源ごとなので、選択中の音に合わせて表示を更新する。
+    private func updateSoundLoopCheckbox() {
+        soundLoopCheckbox.state = settings.loopsSound(settings.soundSelection) ? .on : .off
+    }
+
+    @objc private func soundLoopChanged(_ sender: NSButton) {
+        settings.setLoops(sender.state == .on, forSound: settings.soundSelection)
+        updateEarthquakeUI()
     }
 
     private func reloadSoundPopup() {
@@ -502,6 +587,82 @@ final class SettingsWindowController: NSWindowController {
 
     @objc private func earthquakeEnabledChanged(_ sender: NSButton) {
         settings.earthquakeAlertsEnabled = sender.state == .on
+        updateEarthquakeUI()
+    }
+
+    @objc private func earthquakeIntensityChanged(_ sender: NSPopUpButton) {
+        guard let intensity = sender.selectedItem?.representedObject as? String else { return }
+        settings.earthquakeMinimumIntensity = intensity
+        updateEarthquakeUI()
+    }
+
+    private func selectCurrentEarthquakeIntensity() {
+        let selected = earthquakeIntensityPopup.itemArray.first {
+            ($0.representedObject as? String) == settings.earthquakeMinimumIntensity
+        }
+        if let selected {
+            earthquakeIntensityPopup.select(selected)
+        } else {
+            earthquakeIntensityPopup.selectItem(at: 0)
+        }
+    }
+
+    /// 地震の効果音。先頭は共通の通知音を使う選択肢。
+    private func reloadEarthquakeSoundPopup() {
+        earthquakeSoundPopup.removeAllItems()
+        earthquakeSoundPopup.addItem(withTitle: "共通の通知音")
+        earthquakeSoundPopup.lastItem?.representedObject = ""
+        for name in availableSystemSoundNames() {
+            earthquakeSoundPopup.addItem(withTitle: name)
+            earthquakeSoundPopup.lastItem?.representedObject = "system:\(name)"
+        }
+        let customPaths = settings.customSoundPaths.filter { FileManager.default.fileExists(atPath: $0) }
+        if !customPaths.isEmpty {
+            earthquakeSoundPopup.menu?.addItem(.separator())
+            for path in customPaths {
+                let name = URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent
+                earthquakeSoundPopup.addItem(withTitle: "MP3: \(name)")
+                earthquakeSoundPopup.lastItem?.representedObject = "file:\(path)"
+            }
+        }
+        let selection = settings.earthquakeSoundSelection
+        if let selected = earthquakeSoundPopup.itemArray.first(where: {
+            ($0.representedObject as? String) == selection
+        }) {
+            earthquakeSoundPopup.select(selected)
+        } else {
+            earthquakeSoundPopup.selectItem(at: 0)
+        }
+    }
+
+    private var effectiveEarthquakeSound: String {
+        settings.earthquakeSoundSelection.isEmpty
+            ? settings.soundSelection
+            : settings.earthquakeSoundSelection
+    }
+
+    @objc private func earthquakeSoundChanged(_ sender: NSPopUpButton) {
+        guard let selection = sender.selectedItem?.representedObject as? String else { return }
+        settings.earthquakeSoundSelection = selection
+        updateEarthquakeUI()
+        onPreviewSound?(selection.isEmpty ? settings.soundSelection : selection)
+    }
+
+    @objc private func earthquakeLoopChanged(_ sender: NSButton) {
+        settings.setLoops(sender.state == .on, forSound: effectiveEarthquakeSound)
+        updateSoundLoopCheckbox()
+    }
+
+    /// 下限震度は地震速報が有効なときだけ操作できる。状態表示も合わせて更新する。
+    private func updateEarthquakeUI() {
+        let enabled = settings.earthquakeAlertsEnabled
+        earthquakeIntensityPopup.isEnabled = enabled
+        earthquakeSoundPopup.isEnabled = enabled
+        earthquakeLoopCheckbox.isEnabled = enabled
+        earthquakeLoopCheckbox.state = settings.loopsSound(effectiveEarthquakeSound) ? .on : .off
+        earthquakeStatusLabel.stringValue = enabled
+            ? "震度\(settings.earthquakeMinimumIntensity)以上を監視中"
+            : "地震速報は停止中"
     }
 
     @objc private func edgeChanged(_ sender: NSPopUpButton) {
@@ -522,6 +683,7 @@ final class SettingsWindowController: NSWindowController {
     @objc private func soundChanged(_ sender: NSPopUpButton) {
         guard let selection = sender.selectedItem?.representedObject as? String else { return }
         settings.soundSelection = selection
+        updateSoundLoopCheckbox()
         onTestSound?()
     }
 
@@ -539,6 +701,7 @@ final class SettingsWindowController: NSWindowController {
             settings.customSoundPaths.append(contentsOf: imported)
             if let first = imported.first { settings.soundSelection = "file:\(first)" }
             reloadSoundPopup()
+            reloadEarthquakeSoundPopup()
             onTestSound?()
         } catch {
             let alert = NSAlert(error: error)

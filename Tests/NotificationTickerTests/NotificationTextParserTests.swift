@@ -7,7 +7,7 @@ final class NotificationTextParserTests: XCTestCase {
         XCTAssertEqual(result?.appName, "Messages")
         XCTAssertEqual(result?.title, "Alice")
         XCTAssertEqual(result?.body, "今から向かいます")
-        XCTAssertEqual(result?.tickerText, "Messages  •  Alice  •  今から向かいます")
+        XCTAssertEqual(result?.tickerText, "Alice  •  今から向かいます")
     }
 
     func testFiltersControlsAndDuplicates() {
@@ -42,7 +42,7 @@ final class NotificationTextParserTests: XCTestCase {
             ["33.8", "°", "C", "練馬区三原台 注意報 (Lv.2)"],
             ignoringClockWeatherWidgets: false
         )
-        XCTAssertEqual(splitResult?.tickerText, "33.8  •  °  •  C  練馬区三原台 注意報 (Lv.2)")
+        XCTAssertEqual(splitResult?.tickerText, "°  •  C  練馬区三原台 注意報 (Lv.2)")
     }
 
     func testRecognizesWidgyWindowAndContainerRegardlessOfTextLayout() {

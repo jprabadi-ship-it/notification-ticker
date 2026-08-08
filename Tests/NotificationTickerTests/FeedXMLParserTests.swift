@@ -62,7 +62,8 @@ final class FeedXMLParserTests: XCTestCase {
             feedTitle: "NHKニュース",
             item: FeedItem(title: "速報", identifier: "news-1", publishedAt: item?.publishedAt)
         )
-        XCTAssertTrue(headline.hasPrefix("NHKニュース  •  "))
+        XCTAssertFalse(headline.contains("NHKニュース"))
+        XCTAssertTrue(headline.hasPrefix("09:05"))
         XCTAssertTrue(headline.hasSuffix("  •  速報"))
         XCTAssertEqual(headline.components(separatedBy: "\n").count, 1)
     }

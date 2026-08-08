@@ -39,7 +39,9 @@ struct QuietHoursSchedule: Equatable {
 }
 
 final class TickerSettings {
-    static let evaMinchoFontFamily = "__eva_mincho__"
+    static let boldMinchoFontFamily = "__bold_mincho__"
+    /// 旧バージョンで保存された識別子。読み込み時に現行の値へ読み替える。
+    private static let legacyBoldMinchoFontFamily = "__eva_mincho__"
 
     private enum Key {
         static let backgroundOpacity = "backgroundOpacity"
@@ -53,11 +55,15 @@ final class TickerSettings {
         static let soundEnabled = "soundEnabled"
         static let soundName = "soundName"
         static let soundSelection = "soundSelection"
+        static let soundLoopSelections = "soundLoopSelections"
         static let customSoundPaths = "customSoundPaths"
         static let feedsEnabled = "feedsEnabled"
         static let feedURLs = "feedURLs"
         static let feedIntervalMinutes = "feedIntervalMinutes"
+        static let feedSoundSelections = "feedSoundSelections"
         static let earthquakeAlertsEnabled = "earthquakeAlertsEnabled"
+        static let earthquakeMinimumIntensity = "earthquakeMinimumIntensity"
+        static let earthquakeSoundSelection = "earthquakeSoundSelection"
         static let ignoresClockWeatherWidgets = "ignoresClockWeatherWidgets"
         static let quietHoursEnabled = "quietHoursEnabled"
         static let quietHoursStartMinutes = "quietHoursStartMinutes"
@@ -112,6 +118,19 @@ final class TickerSettings {
         didSet { save(Key.soundSelection, soundSelection) }
     }
 
+    /// 音源（"system:Glass" や "file:/path"）ごとのループ設定。未登録はループする。
+    var soundLoopSelections: [String: Bool] {
+        didSet { save(Key.soundLoopSelections, soundLoopSelections) }
+    }
+
+    func loopsSound(_ selection: String) -> Bool {
+        soundLoopSelections[selection] ?? true
+    }
+
+    func setLoops(_ loops: Bool, forSound selection: String) {
+        soundLoopSelections[selection] = loops
+    }
+
     var customSoundPaths: [String] {
         didSet { save(Key.customSoundPaths, customSoundPaths) }
     }
@@ -128,8 +147,31 @@ final class TickerSettings {
         didSet { save(Key.feedIntervalMinutes, feedIntervalMinutes) }
     }
 
+    /// フィードURL → 効果音の選択文字列。未設定のフィードは共通の通知音を使う。
+    var feedSoundSelections: [String: String] {
+        didSet { save(Key.feedSoundSelections, feedSoundSelections) }
+    }
+
+    func soundSelection(forFeedURL urlString: String) -> String? {
+        feedSoundSelections[urlString]
+    }
+
     var earthquakeAlertsEnabled: Bool {
         didSet { save(Key.earthquakeAlertsEnabled, earthquakeAlertsEnabled) }
+    }
+
+    /// 表示する下限の震度。`JMAEarthquakeReport.selectableIntensities` の値を保存する。
+    var earthquakeMinimumIntensity: String {
+        didSet { save(Key.earthquakeMinimumIntensity, earthquakeMinimumIntensity) }
+    }
+
+    /// 地震速報に使う効果音。空文字なら共通の通知音を使う。
+    var earthquakeSoundSelection: String {
+        didSet { save(Key.earthquakeSoundSelection, earthquakeSoundSelection) }
+    }
+
+    var effectiveEarthquakeSoundSelection: String? {
+        earthquakeSoundSelection.isEmpty ? nil : earthquakeSoundSelection
     }
 
     var ignoresClockWeatherWidgets: Bool {
@@ -156,11 +198,13 @@ final class TickerSettings {
     }
 
     init() {
-        defaults.register(defaults: [
+        // 要素数が多い [String: Any] のリテラルは型推論が指数的に重くなるため、
+        // 明示的に型を書いてビルド時間を抑える。
+        let registered: [String: Any] = [
             Key.backgroundOpacity: 0.62,
             Key.speed: 105.0,
             Key.fontSize: 18.0,
-            Key.fontFamily: Self.evaMinchoFontFamily,
+            Key.fontFamily: Self.boldMinchoFontFamily,
             Key.ignoresMouse: true,
             Key.enabled: true,
             Key.edge: TickerEdge.bottom.rawValue,
@@ -168,26 +212,38 @@ final class TickerSettings {
             Key.soundEnabled: false,
             Key.soundName: "Glass",
             Key.soundSelection: "system:Glass",
+            Key.soundLoopSelections: [String: Bool](),
             Key.customSoundPaths: [],
             Key.feedsEnabled: false,
             Key.feedURLs: [],
             Key.feedIntervalMinutes: 5.0,
+            Key.feedSoundSelections: [String: String](),
             Key.earthquakeAlertsEnabled: true,
+            Key.earthquakeMinimumIntensity: "4",
+            Key.earthquakeSoundSelection: "",
             Key.ignoresClockWeatherWidgets: true,
             Key.quietHoursEnabled: false,
             Key.quietHoursStartMinutes: 23 * 60,
             Key.quietHoursEndMinutes: 7 * 60
-        ])
+        ]
+        defaults.register(defaults: registered)
 
         backgroundOpacity = defaults.double(forKey: Key.backgroundOpacity)
         speed = defaults.double(forKey: Key.speed)
         fontSize = defaults.double(forKey: Key.fontSize)
-        let evaThemeMigrationKey = "didApplyEvaThemeV1"
-        if !defaults.bool(forKey: evaThemeMigrationKey) {
-            defaults.set(Self.evaMinchoFontFamily, forKey: Key.fontFamily)
-            defaults.set(true, forKey: evaThemeMigrationKey)
+        let minchoMigrationKey = "didApplyBoldMinchoV1"
+        if !defaults.bool(forKey: minchoMigrationKey) {
+            defaults.set(Self.boldMinchoFontFamily, forKey: Key.fontFamily)
+            defaults.set(true, forKey: minchoMigrationKey)
         }
-        fontFamily = defaults.string(forKey: Key.fontFamily) ?? Self.evaMinchoFontFamily
+        let storedFontFamily = defaults.string(forKey: Key.fontFamily) ?? Self.boldMinchoFontFamily
+        if storedFontFamily == Self.legacyBoldMinchoFontFamily {
+            // 保存済みの値も現行の識別子へ書き換えておく。
+            defaults.set(Self.boldMinchoFontFamily, forKey: Key.fontFamily)
+            fontFamily = Self.boldMinchoFontFamily
+        } else {
+            fontFamily = storedFontFamily
+        }
         ignoresMouse = defaults.bool(forKey: Key.ignoresMouse)
         isEnabled = defaults.bool(forKey: Key.enabled)
         edge = TickerEdge(rawValue: defaults.string(forKey: Key.edge) ?? "") ?? .bottom
@@ -195,11 +251,15 @@ final class TickerSettings {
         soundEnabled = defaults.bool(forKey: Key.soundEnabled)
         soundName = defaults.string(forKey: Key.soundName) ?? "Glass"
         soundSelection = defaults.string(forKey: Key.soundSelection) ?? "system:Glass"
+        soundLoopSelections = defaults.dictionary(forKey: Key.soundLoopSelections) as? [String: Bool] ?? [:]
         customSoundPaths = defaults.stringArray(forKey: Key.customSoundPaths) ?? []
         feedsEnabled = defaults.bool(forKey: Key.feedsEnabled)
         feedURLs = defaults.stringArray(forKey: Key.feedURLs) ?? []
         feedIntervalMinutes = defaults.double(forKey: Key.feedIntervalMinutes)
+        feedSoundSelections = defaults.dictionary(forKey: Key.feedSoundSelections) as? [String: String] ?? [:]
         earthquakeAlertsEnabled = defaults.bool(forKey: Key.earthquakeAlertsEnabled)
+        earthquakeMinimumIntensity = defaults.string(forKey: Key.earthquakeMinimumIntensity) ?? "4"
+        earthquakeSoundSelection = defaults.string(forKey: Key.earthquakeSoundSelection) ?? ""
         ignoresClockWeatherWidgets = defaults.bool(forKey: Key.ignoresClockWeatherWidgets)
         quietHoursEnabled = defaults.bool(forKey: Key.quietHoursEnabled)
         quietHoursStartMinutes = defaults.integer(forKey: Key.quietHoursStartMinutes)

@@ -62,32 +62,103 @@ final class TickerTextStylerTests: XCTestCase {
 
         XCTAssertTrue(text.hasPrefix(TickerTextStyler.badge))
         assertColor(styled, at: badgeLocation, equals: TickerTextStyler.badgeTextColor)
-        let background = styled.attribute(.backgroundColor, at: badgeLocation, effectiveRange: nil) as? NSColor
-        XCTAssertTrue(background?.isEqual(TickerTextStyler.badgeBackgroundColor) == true)
+        // 赤地は六角形で描くため、矩形になる背景色属性は付けない。
+        XCTAssertNil(styled.attribute(.backgroundColor, at: badgeLocation, effectiveRange: nil))
 
         assertColor(styled, at: nsText.range(of: "タイトル").location, equals: TickerTextStyler.titleColor)
         assertColor(styled, at: nsText.range(of: "内容1").location, equals: TickerTextStyler.contentColor)
     }
 
-    func testDrawsAnnouncementBadgeForNonFeedMessages() {
+    func testBadgeShapeIsHexagonThatEnclosesTheText() {
+        let rect = NSRect(x: 10, y: 20, width: 120, height: 40)
+        let path = TickerTextStyler.hexagonPath(in: rect)
+
+        // move + 5 line + closePath + 始点への復帰
+        XCTAssertEqual(path.elementCount, 8)
+        XCTAssertTrue(path.contains(NSPoint(x: rect.midX, y: rect.midY)))
+        // 文字が置かれる中央帯は六角形の内側に収まる。
+        XCTAssertTrue(path.contains(NSPoint(x: rect.minX + 1, y: rect.midY)))
+        XCTAssertTrue(path.contains(NSPoint(x: rect.maxX - 1, y: rect.midY)))
+    }
+
+    func testDrawsNotificationBadgeForNonFeedMessages() {
         let text = TickerTextLayout.titleAndContentLines(
             in: "タイトル  •  内容1",
-            badge: TickerTextStyler.announcementBadge
+            badge: TickerTextStyler.notificationBadge
         )
         let styled = makeStyled(text)
         let nsText = text as NSString
-        let badgeLocation = nsText.range(of: TickerTextStyler.announcementBadge).location + 1
+        let badgeLocation = nsText.range(of: TickerTextStyler.notificationBadge).location + 1
 
-        XCTAssertTrue(text.hasPrefix(TickerTextStyler.announcementBadge))
+        XCTAssertTrue(text.hasPrefix(TickerTextStyler.notificationBadge))
         assertColor(styled, at: badgeLocation, equals: TickerTextStyler.badgeTextColor)
-        let background = styled.attribute(.backgroundColor, at: badgeLocation, effectiveRange: nil) as? NSColor
-        XCTAssertTrue(background?.isEqual(TickerTextStyler.badgeBackgroundColor) == true)
+        // 赤地は六角形で描くため、矩形になる背景色属性は付けない。
+        XCTAssertNil(styled.attribute(.backgroundColor, at: badgeLocation, effectiveRange: nil))
 
         assertColor(styled, at: nsText.range(of: "タイトル").location, equals: TickerTextStyler.titleColor)
         assertColor(styled, at: nsText.range(of: "内容1").location, equals: TickerTextStyler.contentColor)
     }
 
-    func testInsertsPublishTimeAfterTitle() {
+    func testBadgeColorsFollowSeverity() {
+        let styler = TickerTextStyler.self
+        XCTAssertEqual(styler.backgroundColor(forBadge: styler.badge), styler.feedBadgeColor)
+        XCTAssertEqual(styler.backgroundColor(forBadge: styler.notificationBadge), styler.neutralBadgeColor)
+        XCTAssertEqual(styler.backgroundColor(forBadge: styler.earthquakeBadge), styler.neutralBadgeColor)
+        XCTAssertEqual(styler.backgroundColor(forBadge: styler.earthquakeWarningBadge), styler.cautionBadgeColor)
+        XCTAssertEqual(
+            styler.backgroundColor(forBadge: styler.earthquakeEvacuationBadge),
+            styler.badgeBackgroundColor
+        )
+
+        // 黄色の警戒バッジだけ黒文字。
+        XCTAssertEqual(styler.textColor(forBadge: styler.earthquakeWarningBadge), styler.badgeDarkTextColor)
+        XCTAssertEqual(styler.textColor(forBadge: styler.badge), styler.badgeTextColor)
+    }
+
+    func testBadgeRectStaysInsideTickerBackground() {
+        // 背景が 2pt 内側にある 60pt のティッカーに、はみ出す高さのバッジを置く。
+        let clamped = TickerTextStyler.badgeRect(
+            x: 5, y: -6, width: 100, height: 80, clampedTo: 2...58
+        )
+        XCTAssertEqual(clamped.minY, 2)
+        XCTAssertEqual(clamped.maxY, 58)
+        XCTAssertEqual(clamped.width, 100)
+
+        // 収まっている場合はそのまま。
+        let untouched = TickerTextStyler.badgeRect(
+            x: 5, y: 12, width: 100, height: 30, clampedTo: 2...58
+        )
+        XCTAssertEqual(untouched, NSRect(x: 5, y: 12, width: 100, height: 30))
+    }
+
+    func testDetectsAIToolNotifications() {
+        XCTAssertTrue(TickerTextStyler.isAIToolNotification(appName: "Claude", title: "完了しました"))
+        XCTAssertTrue(TickerTextStyler.isAIToolNotification(appName: "Terminal", title: "Codex finished"))
+        XCTAssertTrue(TickerTextStyler.isAIToolNotification(appName: "claude code", title: nil))
+        XCTAssertFalse(TickerTextStyler.isAIToolNotification(appName: "メッセージ", title: "新着"))
+        XCTAssertFalse(TickerTextStyler.isAIToolNotification(appName: nil, title: nil))
+    }
+
+    func testEarthquakeBadgeFollowsIntensity() {
+        for intensity in ["1", "2", "3"] {
+            XCTAssertEqual(
+                TickerTextStyler.earthquakeBadge(forIntensity: intensity),
+                TickerTextStyler.earthquakeBadge
+            )
+        }
+        XCTAssertEqual(
+            TickerTextStyler.earthquakeBadge(forIntensity: "4"),
+            TickerTextStyler.earthquakeWarningBadge
+        )
+        for intensity in ["5-", "5弱", "5+", "6-", "6+", "7"] {
+            XCTAssertEqual(
+                TickerTextStyler.earthquakeBadge(forIntensity: intensity),
+                TickerTextStyler.earthquakeEvacuationBadge
+            )
+        }
+    }
+
+    func testInsertsPublishTimeAtHead() {
         var components = DateComponents()
         components.year = 2026
         components.month = 7
@@ -100,7 +171,7 @@ final class TickerTextStylerTests: XCTestCase {
 
         let result = TickerTextLayout.insertingTime(date, into: "メッセージ  •  本文")
 
-        XCTAssertEqual(result, "メッセージ  •  09:05  •  本文")
+        XCTAssertEqual(result, "09:05  •  メッセージ  •  本文")
     }
 
     func testStylesTitleTimeAndContentOnSingleLine() {

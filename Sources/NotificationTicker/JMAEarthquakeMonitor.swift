@@ -88,7 +88,13 @@ struct JMAEarthquakeReport: Equatable {
         "【地震】最大震度\(maxIntensity)  •  震源 \(hypocenter)  •  M\(magnitude)  •  津波\(tsunamiStatus)"
     }
 
-    var meetsAlertThreshold: Bool { Self.intensityRank(maxIntensity) >= Self.intensityRank("4") }
+    /// 設定された下限震度に達しているか。
+    func meetsAlertThreshold(minimumIntensity: String) -> Bool {
+        Self.intensityRank(maxIntensity) >= Self.intensityRank(minimumIntensity)
+    }
+
+    /// 設定画面に並べる震度の選択肢。表示名と保存値を兼ねる。
+    static let selectableIntensities = ["1", "2", "3", "4", "5弱", "5強", "6弱", "6強", "7"]
 
     static func intensityRank(_ intensity: String) -> Int {
         switch intensity.trimmingCharacters(in: .whitespacesAndNewlines) {
@@ -357,7 +363,7 @@ final class JMAEarthquakeMonitor {
             self.queue.async {
                 guard self.monitoringEnabled else { return }
                 guard error == nil, let data, let report = JMAEarthquakeXMLParser.parse(data: data) else { return }
-                guard report.meetsAlertThreshold else { return }
+                guard report.meetsAlertThreshold(minimumIntensity: self.settings.earthquakeMinimumIntensity) else { return }
                 DispatchQueue.main.async { [weak self] in self?.onReport?(report) }
             }
         }.resume()

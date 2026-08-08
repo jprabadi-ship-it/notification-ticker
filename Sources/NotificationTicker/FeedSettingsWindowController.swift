@@ -11,17 +11,19 @@ final class FeedSettingsWindowController: NSWindowController, NSTableViewDataSou
     private let intervalPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     var onRefresh: (() -> Void)?
     var onRefreshURL: ((String) -> Void)?
+    /// 効果音を選び直したときの試聴。nil は共通の通知音。
+    var onPreviewSound: ((String?) -> Void)?
 
     init(settings: TickerSettings) {
         self.settings = settings
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 620, height: 430),
+            contentRect: NSRect(x: 0, y: 0, width: 860, height: 470),
             styleMask: [.titled, .closable, .resizable],
             backing: .buffered,
             defer: false
         )
         window.title = "ニュース／RSSフィード"
-        window.minSize = NSSize(width: 540, height: 360)
+        window.minSize = NSSize(width: 700, height: 360)
         window.center()
         window.isReleasedWhenClosed = false
         super.init(window: window)
@@ -37,10 +39,94 @@ final class FeedSettingsWindowController: NSWindowController, NSTableViewDataSou
     func numberOfRows(in tableView: NSTableView) -> Int { settings.feedURLs.count }
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
-        let field = NSTextField(labelWithString: settings.feedURLs[row])
-        field.lineBreakMode = .byTruncatingMiddle
-        field.toolTip = settings.feedURLs[row]
+        let urlString = settings.feedURLs[row]
+        if tableColumn?.identifier.rawValue == "sound" {
+            return makeSoundPopup(forFeedAt: row, urlString: urlString)
+        }
+        if tableColumn?.identifier.rawValue == "loop" {
+            return makeLoopCheckbox(forFeedAt: row, urlString: urlString)
+        }
+        // 途中を省略するとドメインが読めなくなるため、末尾側を省略する。
+        let field = NSTextField(labelWithString: urlString)
+        field.lineBreakMode = .byTruncatingTail
+        field.toolTip = urlString
         return field
+    }
+
+    /// フィード1件ぶんの効果音ポップアップ。先頭は共通の通知音を使う選択肢。
+    private func makeSoundPopup(forFeedAt row: Int, urlString: String) -> NSPopUpButton {
+        let popup = NSPopUpButton(frame: .zero, pullsDown: false)
+        popup.addItem(withTitle: "共通の通知音")
+        popup.lastItem?.representedObject = ""
+
+        for name in Self.availableSystemSoundNames() {
+            popup.addItem(withTitle: name)
+            popup.lastItem?.representedObject = "system:\(name)"
+        }
+        let customPaths = settings.customSoundPaths.filter { FileManager.default.fileExists(atPath: $0) }
+        if !customPaths.isEmpty {
+            popup.menu?.addItem(.separator())
+            for path in customPaths {
+                let name = URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent
+                popup.addItem(withTitle: "MP3: \(name)")
+                popup.lastItem?.representedObject = "file:\(path)"
+            }
+        }
+
+        let selection = settings.soundSelection(forFeedURL: urlString) ?? ""
+        if let selected = popup.itemArray.first(where: { ($0.representedObject as? String) == selection }) {
+            popup.select(selected)
+        } else {
+            popup.selectItem(at: 0)
+        }
+        popup.tag = row
+        popup.target = self
+        popup.action = #selector(soundChanged(_:))
+        return popup
+    }
+
+    /// 通知音の選択肢は設定画面と同じ一覧（システムサウンド＋登録したMP3）。
+    private static func availableSystemSoundNames() -> [String] {
+        let urls = (try? FileManager.default.contentsOfDirectory(
+            at: URL(fileURLWithPath: "/System/Library/Sounds"),
+            includingPropertiesForKeys: nil
+        )) ?? []
+        var names = Set(urls
+            .filter { ["aiff", "wav", "caf"].contains($0.pathExtension.lowercased()) }
+            .map { $0.deletingPathExtension().lastPathComponent })
+        names.insert("Glass")
+        return names.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+    }
+
+    /// ループ設定は音源ごとの共有設定。同じ音を使う他のフィードにも反映される。
+    private func makeLoopCheckbox(forFeedAt row: Int, urlString: String) -> NSButton {
+        let checkbox = NSButton(checkboxWithTitle: "", target: self, action: #selector(loopChanged(_:)))
+        let selection = settings.soundSelection(forFeedURL: urlString) ?? settings.soundSelection
+        checkbox.state = settings.loopsSound(selection) ? .on : .off
+        checkbox.toolTip = "この音源をループ再生します。同じ音を使う他のフィードにも同じ設定が適用されます。"
+        checkbox.tag = row
+        return checkbox
+    }
+
+    @objc private func loopChanged(_ sender: NSButton) {
+        guard settings.feedURLs.indices.contains(sender.tag) else { return }
+        let urlString = settings.feedURLs[sender.tag]
+        let selection = settings.soundSelection(forFeedURL: urlString) ?? settings.soundSelection
+        settings.setLoops(sender.state == .on, forSound: selection)
+        tableView.reloadData()
+    }
+
+    @objc private func soundChanged(_ sender: NSPopUpButton) {
+        guard settings.feedURLs.indices.contains(sender.tag),
+              let selection = sender.selectedItem?.representedObject as? String else { return }
+        let urlString = settings.feedURLs[sender.tag]
+        if selection.isEmpty {
+            settings.feedSoundSelections.removeValue(forKey: urlString)
+        } else {
+            settings.feedSoundSelections[urlString] = selection
+        }
+        tableView.reloadData()
+        onPreviewSound?(selection.isEmpty ? nil : selection)
     }
 
     private func buildInterface() {
@@ -68,11 +154,31 @@ final class FeedSettingsWindowController: NSWindowController, NSTableViewDataSou
         topRow.spacing = 10
         enabledCheckbox.setContentHuggingPriority(.defaultLow, for: .horizontal)
 
+        // URLが読めることを優先し、幅の変動はURL列だけが受け持つ。
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("url"))
         column.title = "登録済みフィードURL"
         column.resizingMask = .autoresizingMask
+        column.minWidth = 380
+        column.width = 620
         tableView.addTableColumn(column)
-        tableView.headerView = nil
+
+        let soundColumn = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("sound"))
+        soundColumn.title = "効果音"
+        soundColumn.resizingMask = .userResizingMask
+        soundColumn.width = 170
+        soundColumn.minWidth = 150
+        soundColumn.maxWidth = 220
+        tableView.addTableColumn(soundColumn)
+
+        let loopColumn = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("loop"))
+        loopColumn.title = "ループ"
+        loopColumn.resizingMask = []
+        loopColumn.width = 60
+        loopColumn.minWidth = 60
+        loopColumn.maxWidth = 60
+        tableView.addTableColumn(loopColumn)
+        // 2列になったので、どちらの列か分かるようヘッダを出す。
+        tableView.rowHeight = 26
         tableView.delegate = self
         tableView.dataSource = self
         tableView.usesAlternatingRowBackgroundColors = true
@@ -177,6 +283,9 @@ final class FeedSettingsWindowController: NSWindowController, NSTableViewDataSou
         guard !indexes.isEmpty else {
             statusLabel.stringValue = "削除するURLを選択してください"
             return
+        }
+        for index in indexes {
+            settings.feedSoundSelections.removeValue(forKey: settings.feedURLs[index])
         }
         settings.feedURLs.remove(atOffsets: indexes)
         tableView.reloadData()

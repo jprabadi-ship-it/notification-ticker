@@ -128,7 +128,8 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
 }
 
 final class FeedMonitor {
-    var onHeadline: ((String) -> Void)?
+    /// 見出しと、その取得元のフィードURL。
+    var onHeadline: ((String, String) -> Void)?
     var onStatusChange: ((String) -> Void)?
 
     private let settings: TickerSettings
@@ -249,7 +250,7 @@ final class FeedMonitor {
         if showLatest {
             for item in feed.items.prefix(5).reversed() {
                 seenIdentifiers.insert(item.identifier)
-                publishHeadline(Self.headline(feedTitle: feed.title, item: item))
+                publishHeadline(Self.headline(feedTitle: feed.title, item: item), urlString: urlString)
             }
         } else if !primedURLs.contains(urlString) {
             feed.items.forEach { seenIdentifiers.insert($0.identifier) }
@@ -258,24 +259,23 @@ final class FeedMonitor {
             let newItems = feed.items.filter { !seenIdentifiers.contains($0.identifier) }
             for item in newItems.prefix(10).reversed() {
                 seenIdentifiers.insert(item.identifier)
-                publishHeadline(Self.headline(feedTitle: feed.title, item: item))
+                publishHeadline(Self.headline(feedTitle: feed.title, item: item), urlString: urlString)
             }
         }
         publishStatus("最終取得: \(feed.title)（\(feed.items.count)件）")
     }
 
-    /// 「フィード名 • 発行時刻 • 見出し」の1行を組み立てる。
+    /// 「発行時刻 • 見出し」の1行を組み立てる。フィード名は表示しない。
     static func headline(feedTitle: String, item: FeedItem) -> String {
         let parts = [
-            feedTitle,
             item.publishedAt.map(FeedDateParser.displayTime),
             item.title
         ].compactMap { $0 }.filter { !$0.isEmpty }
         return parts.joined(separator: "  •  ")
     }
 
-    private func publishHeadline(_ headline: String) {
-        DispatchQueue.main.async { [weak self] in self?.onHeadline?(headline) }
+    private func publishHeadline(_ headline: String, urlString: String) {
+        DispatchQueue.main.async { [weak self] in self?.onHeadline?(headline, urlString) }
     }
 
     private func publishStatus(_ status: String) {

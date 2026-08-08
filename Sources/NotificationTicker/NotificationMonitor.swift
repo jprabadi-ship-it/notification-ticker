@@ -7,8 +7,9 @@ struct CapturedNotification: Equatable {
     let title: String?
     let body: String
 
+    /// アプリ名は表示せず、通知タイトルと本文だけを並べる。
     var tickerText: String {
-        [appName, title, body]
+        [title, body]
             .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
             .joined(separator: "  •  ")
@@ -222,6 +223,7 @@ final class NotificationMonitor {
             return
         }
 
+        // 同一本文の再表示防止は AppDelegate 側の MessageDeduplicator が一括で担う。
         for (fingerprint, notification) in captured where !activeFingerprints.contains(fingerprint) {
             DispatchQueue.main.async { [weak self] in
                 self?.onNotification?(notification)

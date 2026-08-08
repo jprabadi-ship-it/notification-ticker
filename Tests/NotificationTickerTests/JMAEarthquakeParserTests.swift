@@ -24,7 +24,7 @@ final class JMAEarthquakeParserTests: XCTestCase {
         XCTAssertEqual(report?.magnitude, "5.1")
         XCTAssertEqual(report?.maxIntensity, "4")
         XCTAssertEqual(report?.tsunamiStatus, "なし")
-        XCTAssertTrue(report?.meetsAlertThreshold == true)
+        XCTAssertTrue(report?.meetsAlertThreshold(minimumIntensity: "4") == true)
     }
 
     func testReportsStrongIntensityAndTsunamiWarning() {
@@ -34,8 +34,19 @@ final class JMAEarthquakeParserTests: XCTestCase {
         XCTAssertTrue(report?.tickerText.contains("津波あり") == true)
     }
 
-    func testDoesNotAlertBelowIntensityFour() {
-        XCTAssertFalse(parseReport(maxInt: "3", comment: "津波の心配はありません。")?.meetsAlertThreshold == true)
+    func testDoesNotAlertBelowSelectedIntensity() {
+        let report = parseReport(maxInt: "3", comment: "津波の心配はありません。")
+
+        XCTAssertFalse(report?.meetsAlertThreshold(minimumIntensity: "4") == true)
+        XCTAssertTrue(report?.meetsAlertThreshold(minimumIntensity: "3") == true)
+        XCTAssertTrue(report?.meetsAlertThreshold(minimumIntensity: "1") == true)
+    }
+
+    func testTreatsWeakAndStrongFiveAsDistinctThresholds() {
+        let report = parseReport(maxInt: "5-", comment: "津波の心配はありません。")
+
+        XCTAssertTrue(report?.meetsAlertThreshold(minimumIntensity: "5弱") == true)
+        XCTAssertFalse(report?.meetsAlertThreshold(minimumIntensity: "5強") == true)
     }
 
     private func parseReport(maxInt: String, comment: String) -> JMAEarthquakeReport? {

@@ -13,9 +13,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var toggleMenuItem: NSMenuItem!
     private var activeSound: NSSound?
     private var activeSoundSelection: String?
+    /// 先頭メッセージに割り当てられた音。nil なら共通の通知音を使う。
+    private var leadingSoundSelection: String?
     private var soundFadeTimer: Timer?
     private var quietHoursTimer: Timer?
     private var isQuietHoursActive = false
+    /// 発信元をまたいで、同じ本文の24時間以内の再表示を防ぐ。
+    private let deduplicator = MessageDeduplicator()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         tickerController = TickerPanelController(settings: settings)
@@ -24,14 +28,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self, self.settings.soundEnabled else { return }
             self.playNotificationSound(looping: true)
         }
+        // 先頭メッセージが変わったら、そのフィードに割り当てた音へ切り替える。
+        tickerController.tickerView.onLeadingSoundChange = { [weak self] selection in
+            guard let self else { return }
+            self.leadingSoundSelection = selection
+            guard self.settings.soundEnabled, self.tickerController.panel.isVisible else { return }
+            self.playNotificationSound(looping: true)
+        }
         settingsController = SettingsWindowController(settings: settings, monitor: monitor)
         feedMonitor = FeedMonitor(settings: settings)
         earthquakeMonitor = JMAEarthquakeMonitor(settings: settings)
         feedSettingsController = FeedSettingsWindowController(settings: settings)
         settingsController.onTest = { [weak self] in self?.showTestMessage() }
-        settingsController.onTestSound = { [weak self] in self?.playNotificationSound(looping: false) }
+        settingsController.onTestSound = { [weak self] in
+            guard let self else { return }
+            self.playNotificationSound(looping: false, overriding: self.settings.soundSelection)
+        }
         settingsController.onShowFeeds = { [weak self] in self?.showFeedSettings() }
+        settingsController.onPreviewSound = { [weak self] selection in
+            self?.playNotificationSound(looping: false, overriding: selection)
+        }
         feedSettingsController.onRefresh = { [weak self] in self?.feedMonitor.refreshNow() }
+        feedSettingsController.onPreviewSound = { [weak self] selection in
+            guard let self else { return }
+            self.playNotificationSound(
+                looping: false,
+                overriding: selection ?? self.settings.soundSelection
+            )
+        }
         feedSettingsController.onRefreshURL = { [weak self] urlString in
             self?.feedMonitor.refreshNow(urlString: urlString)
         }
@@ -41,10 +65,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         monitor.onNotification = { [weak self] notification in
-            guard self?.isQuietHoursActive == false else { return }
-            self?.tickerController.enqueue(
+            guard let self, !self.isQuietHoursActive else { return }
+            guard self.deduplicator.shouldEmit(notification.tickerText) else { return }
+            let isAITool = TickerTextStyler.isAIToolNotification(
+                appName: notification.appName,
+                title: notification.title
+            )
+            self.tickerController.enqueue(
                 TickerTextLayout.insertingTime(Date(), into: notification.tickerText),
-                badge: TickerTextStyler.announcementBadge
+                badge: TickerTextStyler.notificationBadge,
+                badgeColor: isAITool ? TickerTextStyler.aiBadgeColor : nil
             )
         }
         monitor.onStatusChange = { [weak self] status in
@@ -53,10 +83,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.statusMenuItem.title = effectiveStatus.label
             self.settingsController.updateStatus(effectiveStatus)
         }
-        feedMonitor.onHeadline = { [weak self] headline in
+        feedMonitor.onHeadline = { [weak self] headline, urlString in
             guard let self else { return }
             guard !self.isQuietHoursActive else { return }
-            self.tickerController.enqueue(headline)
+            guard self.deduplicator.shouldEmit(headline) else { return }
+            self.tickerController.enqueue(
+                headline,
+                soundSelection: self.settings.soundSelection(forFeedURL: urlString)
+            )
         }
         feedMonitor.onStatusChange = { [weak self] status in
             self?.feedSettingsController.updateStatus(status)
@@ -64,15 +98,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         earthquakeMonitor.onReport = { [weak self] report in
             guard let self else { return }
             guard !self.isQuietHoursActive else { return }
+            guard self.deduplicator.shouldEmit(report.tickerText) else { return }
             self.tickerController.enqueue(
                 TickerTextLayout.insertingTime(Date(), into: report.tickerText),
-                badge: TickerTextStyler.announcementBadge
+                badge: TickerTextStyler.earthquakeBadge(forIntensity: report.maxIntensity),
+                soundSelection: self.settings.effectiveEarthquakeSoundSelection
             )
         }
         earthquakeMonitor.onStatusChange = { [weak self] status in
             self?.settingsController.updateEarthquakeStatus(status)
         }
 
+        installEditMenu()
         configureStatusItem()
         startQuietHoursTimer()
         updateQuietHoursState(force: true)
@@ -89,6 +126,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         feedMonitor.stop()
         earthquakeMonitor.stop()
         quietHoursTimer?.invalidate()
+    }
+
+    /// LSUIElement（accessory）アプリはメインメニューを持たないため、⌘V などの
+    /// 編集系キーが responder chain に届かず、テキスト欄に貼り付けできない。
+    /// メニューバーには表示されないが、キー等価物の解決にはメインメニューが必要。
+    private func installEditMenu() {
+        let mainMenu = NSMenu()
+
+        let appMenuItem = NSMenuItem()
+        let appMenu = NSMenu()
+        appMenu.addItem(
+            withTitle: "終了",
+            action: #selector(NSApplication.terminate(_:)),
+            keyEquivalent: "q"
+        )
+        appMenuItem.submenu = appMenu
+        mainMenu.addItem(appMenuItem)
+
+        let editMenuItem = NSMenuItem()
+        let editMenu = NSMenu(title: "編集")
+        let entries: [(String, Selector, String, NSEvent.ModifierFlags)] = [
+            ("取り消す", Selector(("undo:")), "z", .command),
+            ("やり直す", Selector(("redo:")), "z", [.command, .shift]),
+            ("カット", #selector(NSText.cut(_:)), "x", .command),
+            ("コピー", #selector(NSText.copy(_:)), "c", .command),
+            ("ペースト", #selector(NSText.paste(_:)), "v", .command),
+            ("すべてを選択", #selector(NSText.selectAll(_:)), "a", .command)
+        ]
+        for (title, action, key, modifiers) in entries {
+            let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
+            item.keyEquivalentModifierMask = modifiers
+            editMenu.addItem(item)
+        }
+        editMenuItem.submenu = editMenu
+        mainMenu.addItem(editMenuItem)
+
+        NSApp.mainMenu = mainMenu
     }
 
     private func configureStatusItem() {
@@ -133,7 +207,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 Date(),
                 into: "メッセージ  •  通知ティッカーのテスト表示です  •  背景透明度と速度は設定画面で変更できます"
             ),
-            badge: TickerTextStyler.announcementBadge
+            badge: TickerTextStyler.notificationBadge
         )
     }
 
@@ -142,28 +216,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    private func playNotificationSound(looping: Bool) {
+    /// `overriding` を渡すと、先頭メッセージの割り当てを無視して指定の音を鳴らす（試聴用）。
+    private func playNotificationSound(looping: Bool, overriding: String? = nil) {
         guard !isQuietHoursActive else { return }
         soundFadeTimer?.invalidate()
         soundFadeTimer = nil
-        if activeSoundSelection != settings.soundSelection {
+        let selection = overriding ?? leadingSoundSelection ?? settings.soundSelection
+        if activeSoundSelection != selection {
             activeSound?.stop()
-            if settings.soundSelection.hasPrefix("file:") {
-                let path = String(settings.soundSelection.dropFirst("file:".count))
+            if selection.hasPrefix("file:") {
+                let path = String(selection.dropFirst("file:".count))
                 activeSound = NSSound(contentsOfFile: path, byReference: true)
             } else {
-                let name = String(settings.soundSelection.dropFirst("system:".count))
+                let name = String(selection.dropFirst("system:".count))
                 activeSound = NSSound(named: NSSound.Name(name))
             }
-            activeSoundSelection = settings.soundSelection
+            activeSoundSelection = selection
         }
+        // ループするかは音源ごとの設定に従う。
+        let shouldLoop = looping && settings.loopsSound(selection)
         if let activeSound {
             activeSound.volume = 1
-            if looping && activeSound.isPlaying && activeSound.loops {
+            if shouldLoop && activeSound.isPlaying && activeSound.loops {
                 return
             }
             activeSound.stop()
-            activeSound.loops = looping
+            activeSound.loops = shouldLoop
             activeSound.play()
         } else {
             NSSound.beep()

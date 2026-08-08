@@ -6,15 +6,63 @@ enum TickerTextStyler {
     static let contentColor = NSColor.white
     static let timeColor = NSColor(calibratedRed: 1, green: 0.47, blue: 0.04, alpha: 1)
     static let badgeTextColor = NSColor.white
+    /// 黄色のバッジは白文字だと読めないので黒にする。
+    static let badgeDarkTextColor = NSColor.black
     static let badgeBackgroundColor = NSColor(calibratedRed: 0.85, green: 0.04, blue: 0.04, alpha: 1)
+    static let feedBadgeColor = NSColor(calibratedRed: 0.16, green: 0.66, blue: 0.88, alpha: 1)
+    static let neutralBadgeColor = NSColor(calibratedRed: 0.45, green: 0.45, blue: 0.47, alpha: 1)
+    static let cautionBadgeColor = NSColor(calibratedRed: 0.98, green: 0.80, blue: 0.05, alpha: 1)
+    /// Claude Code / Codex など、AIツール由来の通知に使う地色。
+    static let aiBadgeColor = NSColor(calibratedRed: 0.98, green: 0.52, blue: 0.08, alpha: 1)
     /// 各モニターがメッセージを組み立てるときに使う入力用の区切り。
     static let separator = "  •  "
-    /// 行頭に赤地で描画されるバッジ（フィード由来のメッセージ用）。
-    static let badge = " 通知 "
-    /// フィード以外（macOS通知・地震速報など）に使うバッジ。
-    static let announcementBadge = " 告知 "
+    /// 行頭に赤地の六角形で描画されるバッジ（フィード由来のメッセージ用）。
+    /// 前後の空白は、六角形の斜辺に文字がかからないようにするための余白。
+    static let badge = "  通達  "
+    /// macOS通知など、フィード以外のメッセージに使うバッジ。
+    static let notificationBadge = "  通知  "
+    /// 地震速報のバッジ。震度に応じて切り替える。
+    static let earthquakeBadge = "  地震  "
+    static let earthquakeWarningBadge = "  警戒  "
+    static let earthquakeEvacuationBadge = "  退避  "
     /// 行頭バッジとして扱う文字列の一覧。
-    static let badges = [badge, announcementBadge]
+    static let badges = [
+        badge,
+        notificationBadge,
+        earthquakeBadge,
+        earthquakeWarningBadge,
+        earthquakeEvacuationBadge
+    ]
+
+    /// バッジの地色。通達=水色、通知/地震=灰色、警戒=黄色、退避=赤。
+    static func backgroundColor(forBadge badgeText: String) -> NSColor {
+        switch badgeText {
+        case badge: return feedBadgeColor
+        case notificationBadge, earthquakeBadge: return neutralBadgeColor
+        case earthquakeWarningBadge: return cautionBadgeColor
+        default: return badgeBackgroundColor
+        }
+    }
+
+    /// Claude Code / Codex など、AIツール由来の通知かどうか。
+    static func isAIToolNotification(appName: String?, title: String?) -> Bool {
+        let haystack = [appName, title].compactMap { $0 }.joined(separator: " ").lowercased()
+        return ["claude", "codex"].contains { haystack.contains($0) }
+    }
+
+    /// バッジの文字色。黄色の地には黒、それ以外は白。
+    static func textColor(forBadge badgeText: String) -> NSColor {
+        badgeText == earthquakeWarningBadge ? badgeDarkTextColor : badgeTextColor
+    }
+
+    /// 震度4で「警戒」、震度5弱以上で「退避」、それ未満は「地震」。
+    static func earthquakeBadge(forIntensity intensity: String) -> String {
+        switch JMAEarthquakeReport.intensityRank(intensity) {
+        case ...3: return earthquakeBadge
+        case 4: return earthquakeWarningBadge
+        default: return earthquakeEvacuationBadge
+        }
+    }
     /// バッジとタイトルの間隔。
     static let badgeSpacing = "  "
     /// 表示上の区切り（記号は出さず空白のみ）。
@@ -67,19 +115,48 @@ enum TickerTextStyler {
             }
         }
 
+        // 赤地は矩形の背景色ではなく六角形で描くため、ここでは文字色だけを白にする。
         for badgeText in badges {
             var searchStart = text.startIndex
             while let badgeRange = text.range(of: badgeText, range: searchStart..<text.endIndex) {
+                let foreground = textColor(forBadge: badgeText)
                 result.addAttributes([
-                    .foregroundColor: badgeTextColor,
-                    .strokeColor: badgeTextColor,
-                    .strokeWidth: 0,
-                    .backgroundColor: badgeBackgroundColor
+                    .foregroundColor: foreground,
+                    .strokeColor: foreground,
+                    .strokeWidth: 0
                 ], range: NSRange(badgeRange, in: text))
                 searchStart = badgeRange.upperBound
             }
         }
         return result
+    }
+
+    /// バッジの外形。ティッカーの背景からはみ出さないよう上下を切り詰める。
+    static func badgeRect(
+        x: CGFloat,
+        y: CGFloat,
+        width: CGFloat,
+        height: CGFloat,
+        clampedTo verticalBounds: ClosedRange<CGFloat>
+    ) -> NSRect {
+        let minY = max(y, verticalBounds.lowerBound)
+        let maxY = min(y + height, verticalBounds.upperBound)
+        return NSRect(x: x, y: minY, width: width, height: max(0, maxY - minY))
+    }
+
+    /// 左右が尖った横長の六角形。文字を囲む矩形をそのまま渡す。
+    static func hexagonPath(in rect: NSRect) -> NSBezierPath {
+        let inset = min(rect.height * 0.28, rect.width * 0.3)
+        let midY = rect.midY
+        let path = NSBezierPath()
+        path.move(to: NSPoint(x: rect.minX, y: midY))
+        path.line(to: NSPoint(x: rect.minX + inset, y: rect.maxY))
+        path.line(to: NSPoint(x: rect.maxX - inset, y: rect.maxY))
+        path.line(to: NSPoint(x: rect.maxX, y: midY))
+        path.line(to: NSPoint(x: rect.maxX - inset, y: rect.minY))
+        path.line(to: NSPoint(x: rect.minX + inset, y: rect.minY))
+        path.close()
+        return path
     }
 }
 
@@ -130,15 +207,10 @@ enum TickerTextLayout {
         return badge + TickerTextStyler.badgeSpacing + text
     }
 
-    /// タイトルの直後に発行時刻を差し込む。フィード以外（通知・地震速報）の入力用。
+    /// 先頭に発行時刻を差し込む。フィード以外（通知・地震速報）の入力用。
     static func insertingTime(_ date: Date, into text: String) -> String {
         let time = FeedDateParser.displayTime(for: date)
-        var sections = text.components(separatedBy: TickerTextStyler.separator)
-        guard sections.count > 1 else {
-            return ([time, text]).joined(separator: TickerTextStyler.separator)
-        }
-        sections.insert(time, at: 1)
-        return sections.joined(separator: TickerTextStyler.separator)
+        return ([time, text]).joined(separator: TickerTextStyler.separator)
     }
 
     private static func singleLine(in text: String) -> String {
@@ -152,29 +224,47 @@ enum TickerTextLayout {
 final class TickerView: NSView {
     private let settings: TickerSettings
     private var displayLinkTimer: Timer?
-    private var messages: [String] = []
-    private var currentMessage: String?
-    private var currentX: CGFloat = 0
+    /// 流れている最中のメッセージ。前後が途切れないよう複数を同時に保持する。
+    private struct TickerItem {
+        let text: String
+        let badgeColor: NSColor
+        /// このメッセージが先頭にいる間に鳴らす音。nil なら共通の通知音。
+        let soundSelection: String?
+        var x: CGFloat
+        var width: CGFloat
+        var lineCount: Int
+    }
+
+    private var items: [TickerItem] = []
+    /// メッセージ同士の間隔。
+    private let messageGap: CGFloat = 72
     /// 背景の警告ストライプが右方向へ進んだ距離。1周期ぶんで折り返す。
     private var stripePhase: CGFloat = 0
     /// ストライプのスクロール速度（pt/秒）。本文より大幅に遅くしてゆっくり流す。
     private let stripeScrollSpeed: CGFloat = 8
     private var previousTimestamp = ProcessInfo.processInfo.systemUptime
     var onActivityChange: ((Bool) -> Void)?
+    /// 先頭メッセージが入れ替わり、鳴らすべき音が変わったときに呼ばれる。
+    var onLeadingSoundChange: ((String?) -> Void)?
+    private var lastReportedSoundSelection: String??
     var onDoubleClick: (() -> Void)?
     var onContentMetricsChange: (() -> Void)?
 
-    var hasContent: Bool { currentMessage != nil || !messages.isEmpty }
+    var hasContent: Bool { !items.isEmpty }
+
+    /// ティッカーの背景が上下に持つ余白。
+    private static let backgroundVerticalInset: CGFloat = 2
+    /// 警告ストライプの最大帯幅。`drawWarningStripes` の上限値と一致させる。
+    private static let maximumStripeBandHeight: CGFloat = 10
+    /// 背景の内側マージン（bounds の inset ＋ 帯幅）。
+    /// 本文とバッジは斜線の帯の内側いっぱいを使う。
+    private static var contentInset: CGFloat { backgroundVerticalInset + maximumStripeBandHeight }
 
     var requiredThickness: CGFloat {
         let rowHeight = textRowHeight
-        let baseThickness = max(60, rowHeight + 24)
-        guard let currentMessage else { return baseThickness }
-        let lineCount = min(
-            TickerTextLayout.maximumLines,
-            max(1, currentMessage.components(separatedBy: "\n").count)
-        )
-        return max(60, rowHeight * CGFloat(lineCount) + 24)
+        // 同時に流れている中で最も行数の多いものに合わせる。
+        let lineCount = items.map(\.lineCount).max() ?? 1
+        return max(60, rowHeight * CGFloat(lineCount) + Self.contentInset * 2)
     }
 
     init(frame frameRect: NSRect, settings: TickerSettings) {
@@ -196,19 +286,53 @@ final class TickerView: NSView {
         }
     }
 
-    func enqueue(_ message: String, badge: String = TickerTextStyler.badge) {
+    var leadingSoundSelection: String? { items.first?.soundSelection }
+
+    func enqueue(
+        _ message: String,
+        badge: String = TickerTextStyler.badge,
+        badgeColor: NSColor? = nil,
+        soundSelection: String? = nil
+    ) {
         let cleaned = TickerTextLayout.titleAndContentLines(
             in: message.trimmingCharacters(in: .whitespacesAndNewlines),
             badge: badge
         )
         guard !cleaned.isEmpty else { return }
-        messages.append(cleaned)
-        if currentMessage == nil { advanceMessage() }
+        let wasEmpty = items.isEmpty
+        // 直前のメッセージの末尾に続けて並べる。画面右端より手前には置かない。
+        let trailing = items.map { $0.x + $0.width }.max()
+        let startX = max(scrollExtent + 24, (trailing ?? 0) + messageGap)
+        items.append(
+            TickerItem(
+                text: cleaned,
+                badgeColor: badgeColor ?? TickerTextStyler.backgroundColor(forBadge: badge),
+                soundSelection: soundSelection,
+                x: startX,
+                width: measuredSize(of: cleaned).width,
+                lineCount: min(
+                    TickerTextLayout.maximumLines,
+                    max(1, cleaned.components(separatedBy: "\n").count)
+                )
+            )
+        )
+        onContentMetricsChange?()
+        if wasEmpty { onActivityChange?(true) }
+        notifyLeadingSoundIfNeeded()
+        needsDisplay = true
+    }
+
+    /// 先頭が入れ替わったときだけ通知する。毎フレーム鳴らし直さないための番人。
+    private func notifyLeadingSoundIfNeeded() {
+        let selection = leadingSoundSelection
+        if let last = lastReportedSoundSelection, last == selection { return }
+        lastReportedSoundSelection = .some(selection)
+        onLeadingSoundChange?(selection)
     }
 
     func clear() {
-        messages.removeAll()
-        currentMessage = nil
+        items.removeAll()
+        lastReportedSoundSelection = nil
         onContentMetricsChange?()
         onActivityChange?(false)
         needsDisplay = true
@@ -218,8 +342,14 @@ final class TickerView: NSView {
         needsDisplay = true
     }
 
+    /// フォントや表示位置が変わると文字幅も変わるため、幅を測り直して並べ直す。
     func refreshLayout() {
-        if currentMessage != nil { currentX = scrollExtent + 24 }
+        var nextX = scrollExtent + 24
+        for index in items.indices {
+            items[index].width = measuredSize(of: items[index].text).width
+            items[index].x = nextX
+            nextX = items[index].x + items[index].width + messageGap
+        }
         onContentMetricsChange?()
         needsDisplay = true
     }
@@ -228,16 +358,19 @@ final class TickerView: NSView {
         super.draw(dirtyRect)
         guard settings.isEnabled else { return }
 
-        let backgroundRect = bounds.insetBy(dx: 0, dy: 2)
+        let backgroundRect = bounds.insetBy(dx: 0, dy: Self.backgroundVerticalInset)
         let path = NSBezierPath(roundedRect: backgroundRect, xRadius: 2, yRadius: 2)
         NSColor.black.withAlphaComponent(settings.backgroundOpacity).setFill()
         path.fill()
         drawWarningStripes(in: backgroundRect)
 
-        guard let currentMessage else { return }
+        guard !items.isEmpty else { return }
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineBreakMode = .byClipping
-        let styledMessage = styledText(currentMessage, paragraphStyle: paragraph)
+
+        // 画面に掛かっているものだけ描く。右側で待機中のものは描画しない。
+        let onScreen = items.filter { $0.x < scrollExtent && $0.x + $0.width > 0 }
+        guard !onScreen.isEmpty else { return }
 
         if settings.edge.isVertical {
             guard let context = NSGraphicsContext.current?.cgContext else { return }
@@ -249,10 +382,29 @@ final class TickerView: NSView {
                 context.translateBy(x: 0, y: bounds.height)
                 context.rotate(by: -.pi / 2)
             }
-            drawLines(styledMessage, sourceText: currentMessage, x: currentX, canvasHeight: bounds.width)
+            // 回転後は元の height が横方向になるため、縦方向の余白は付かない。
+            for item in onScreen {
+                drawLines(
+                    styledText(item.text, paragraphStyle: paragraph),
+                    sourceText: item.text,
+                    x: item.x,
+                    canvasHeight: bounds.width,
+                    badgeVerticalInset: 0,
+                    badgeColor: item.badgeColor
+                )
+            }
             context.restoreGState()
         } else {
-            drawLines(styledMessage, sourceText: currentMessage, x: currentX, canvasHeight: bounds.height)
+            for item in onScreen {
+                drawLines(
+                    styledText(item.text, paragraphStyle: paragraph),
+                    sourceText: item.text,
+                    x: item.x,
+                    canvasHeight: bounds.height,
+                    badgeVerticalInset: Self.contentInset,
+                    badgeColor: item.badgeColor
+                )
+            }
         }
     }
 
@@ -269,30 +421,25 @@ final class TickerView: NSView {
         previousTimestamp = now
         stripePhase += stripeScrollSpeed * CGFloat(elapsed)
 
-        guard settings.isEnabled, let currentMessage else {
+        guard settings.isEnabled, !items.isEmpty else {
             needsDisplay = true
             return
         }
 
-        currentX -= CGFloat(settings.speed * elapsed)
-        let width = measuredSize(of: currentMessage).width
+        let distance = CGFloat(settings.speed * elapsed)
+        for index in items.indices { items[index].x -= distance }
 
-        if currentX + width < 0 { advanceMessage() }
-        needsDisplay = true
-    }
-
-    private func advanceMessage() {
-        if messages.isEmpty {
-            currentMessage = nil
+        let remaining = items.filter { $0.x + $0.width >= 0 }
+        if remaining.count != items.count {
+            items = remaining
             onContentMetricsChange?()
-            onActivityChange?(false)
-            needsDisplay = true
-            return
+            if items.isEmpty {
+                lastReportedSoundSelection = nil
+                onActivityChange?(false)
+            } else {
+                notifyLeadingSoundIfNeeded()
+            }
         }
-        currentMessage = messages.removeFirst()
-        onContentMetricsChange?()
-        currentX = scrollExtent + 24
-        onActivityChange?(true)
         needsDisplay = true
     }
 
@@ -300,9 +447,39 @@ final class TickerView: NSView {
         settings.edge.isVertical ? bounds.height : bounds.width
     }
 
+    /// ホイールイベントを本文の移動量へ変換する。上回しで負（早送り）、下回しで正（逆戻り）。
+    /// 「ナチュラルなスクロール」設定でも上回し＝早送りになるよう符号を揃える。
+    static func scrollNudge(for event: NSEvent) -> CGFloat? {
+        let raw = event.scrollingDeltaY
+        guard raw != 0 else { return nil }
+        let normalized = event.isDirectionInvertedFromDevice ? -raw : raw
+        let step: CGFloat = event.hasPreciseScrollingDeltas ? 1.0 : 12.0
+        return -normalized * step
+    }
+
+    /// クリックスルーが無効なときは、パネル自身にホイールイベントが届く。
+    override func scrollWheel(with event: NSEvent) {
+        guard let delta = TickerView.scrollNudge(for: event) else {
+            super.scrollWheel(with: event)
+            return
+        }
+        nudgeScroll(by: delta)
+    }
+
+    /// ホイール操作で本文の位置を手送りする。正の値で逆戻り、負の値で早送り。
+    /// 逆戻りは表示開始位置より手前には戻さない。
+    func nudgeScroll(by delta: CGFloat) {
+        guard let leading = items.first else { return }
+        // 先頭のメッセージが表示開始位置より右へ戻らない範囲で、全体をまとめて動かす。
+        let clamped = min(delta, scrollExtent + 24 - leading.x)
+        guard clamped != 0 else { return }
+        for index in items.indices { items[index].x += clamped }
+        needsDisplay = true
+    }
+
     private var selectedFont: NSFont {
-        if settings.fontFamily == TickerSettings.evaMinchoFontFamily {
-            return evaMinchoFont
+        if settings.fontFamily == TickerSettings.boldMinchoFontFamily {
+            return boldMinchoFont
         }
         if settings.fontFamily != "__system__",
            let font = NSFontManager.shared.font(
@@ -328,19 +505,35 @@ final class TickerView: NSView {
         _ attributed: NSAttributedString,
         sourceText: String,
         x: CGFloat,
-        canvasHeight: CGFloat
+        canvasHeight: CGFloat,
+        badgeVerticalInset: CGFloat,
+        badgeColor: NSColor
     ) {
         let source = sourceText as NSString
         var location = 0
         // Point-based drawing leaves the font's leading above the glyphs.
         // Split it across both sides so the visible letters sit centrally.
-        var y = canvasHeight - 12 - textRowHeight + textVerticalCenteringOffset
+        var y = canvasHeight - Self.contentInset - textRowHeight + textVerticalCenteringOffset
 
-        for line in sourceText.components(separatedBy: "\n").prefix(TickerTextLayout.maximumLines) {
+        let lines = Array(sourceText.components(separatedBy: "\n").prefix(TickerTextLayout.maximumLines))
+        // 1行のときはバッジを帯の内側いっぱいまで広げる。複数行では行の高さに収める。
+        let badgeFillsBounds = lines.count == 1
+
+        for line in lines {
             let length = (line as NSString).length
             let range = NSRange(location: location, length: length)
             if length > 0 {
-                attributed.attributedSubstring(from: range).draw(at: NSPoint(x: x, y: y))
+                let lineText = attributed.attributedSubstring(from: range)
+                drawBadgeHexagon(
+                    for: line,
+                    in: lineText,
+                    x: x,
+                    y: y,
+                    verticalBounds: badgeVerticalInset...(canvasHeight - badgeVerticalInset),
+                    fillsBounds: badgeFillsBounds,
+                    color: badgeColor
+                )
+                lineText.draw(at: NSPoint(x: x, y: y))
             }
             location += length + 1
             y -= textRowHeight
@@ -348,7 +541,39 @@ final class TickerView: NSView {
         }
     }
 
-    private var evaMinchoFont: NSFont {
+    /// 行頭バッジの文字幅を測り、その背後に赤い六角形を敷く。
+    private func drawBadgeHexagon(
+        for line: String,
+        in attributedLine: NSAttributedString,
+        x: CGFloat,
+        y: CGFloat,
+        verticalBounds: ClosedRange<CGFloat>,
+        fillsBounds: Bool,
+        color: NSColor
+    ) {
+        guard let badge = TickerTextStyler.badges.first(where: { line.hasPrefix($0) }) else { return }
+        let badgeLength = (badge as NSString).length
+        guard badgeLength <= attributedLine.length else { return }
+        let badgeWidth = measuredSize(
+            of: attributedLine.attributedSubstring(from: NSRange(location: 0, length: badgeLength))
+        ).width
+        guard badgeWidth > 0 else { return }
+
+        let rect = TickerTextStyler.badgeRect(
+            x: x,
+            y: fillsBounds ? verticalBounds.lowerBound : y,
+            width: badgeWidth,
+            height: fillsBounds
+                ? verticalBounds.upperBound - verticalBounds.lowerBound
+                : textRowHeight,
+            clampedTo: verticalBounds
+        )
+        guard rect.height > 0 else { return }
+        color.setFill()
+        TickerTextStyler.hexagonPath(in: rect).fill()
+    }
+
+    private var boldMinchoFont: NSFont {
         for postScriptName in ["YuMin-Demibold", "HiraMinProN-W6"] {
             if let font = NSFont(name: postScriptName, size: settings.fontSize) { return font }
         }
@@ -369,7 +594,7 @@ final class TickerView: NSView {
     }
 
     private func drawWarningStripes(in backgroundRect: NSRect) {
-        let bandHeight = min(10, max(7, backgroundRect.height * 0.16))
+        let bandHeight = min(Self.maximumStripeBandHeight, max(7, backgroundRect.height * 0.16))
         let bands = [
             NSRect(x: backgroundRect.minX, y: backgroundRect.minY, width: backgroundRect.width, height: bandHeight),
             NSRect(x: backgroundRect.minX, y: backgroundRect.maxY - bandHeight, width: backgroundRect.width, height: bandHeight)
@@ -418,7 +643,7 @@ final class TickerView: NSView {
         TickerTextStyler.attributedString(
             for: text,
             font: selectedFont,
-            strokeWidth: settings.fontFamily == TickerSettings.evaMinchoFontFamily ? -3.0 : 0,
+            strokeWidth: settings.fontFamily == TickerSettings.boldMinchoFontFamily ? -3.0 : 0,
             paragraphStyle: paragraphStyle
         )
     }
@@ -432,6 +657,7 @@ final class TickerPanelController {
     private let settings: TickerSettings
     private var screenObserver: NSObjectProtocol?
     private var globalMouseMonitor: Any?
+    private var globalScrollMonitor: Any?
     private var fadeGeneration = 0
     private var isSuppressed = false
 
@@ -476,6 +702,23 @@ final class TickerPanelController {
             }
         }
 
+        // ティッカーはクリックスルー（ignoresMouseEvents）で使うことが多く、
+        // パネル自身にはホイールが届かない。ダブルクリック終了と同じくグローバル監視で拾う。
+        globalScrollMonitor = NSEvent.addGlobalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+            let raw = event.scrollingDeltaY
+            guard raw != 0 else { return }
+            // 「ナチュラルなスクロール」設定に関わらず、上回し＝正になるよう揃える。
+            let normalized = event.isDirectionInvertedFromDevice ? -raw : raw
+            let step: CGFloat = event.hasPreciseScrollingDeltas ? 1.0 : 12.0
+            DispatchQueue.main.async {
+                guard let self,
+                      self.panel.isVisible,
+                      self.panel.frame.contains(NSEvent.mouseLocation) else { return }
+                // 上回しは早送り（左へ進める）、下回しは逆戻り（右へ戻す）。
+                self.tickerView.nudgeScroll(by: -normalized * step)
+            }
+        }
+
         screenObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification,
             object: nil,
@@ -489,11 +732,17 @@ final class TickerPanelController {
     deinit {
         if let screenObserver { NotificationCenter.default.removeObserver(screenObserver) }
         if let globalMouseMonitor { NSEvent.removeMonitor(globalMouseMonitor) }
+        if let globalScrollMonitor { NSEvent.removeMonitor(globalScrollMonitor) }
     }
 
-    func enqueue(_ text: String, badge: String = TickerTextStyler.badge) {
+    func enqueue(
+        _ text: String,
+        badge: String = TickerTextStyler.badge,
+        badgeColor: NSColor? = nil,
+        soundSelection: String? = nil
+    ) {
         guard !isSuppressed else { return }
-        tickerView.enqueue(text, badge: badge)
+        tickerView.enqueue(text, badge: badge, badgeColor: badgeColor, soundSelection: soundSelection)
         if settings.isEnabled { showPanel() }
     }
 
