@@ -1,4 +1,5 @@
 import AppKit
+import ServiceManagement
 import UniformTypeIdentifiers
 
 /// 原点を左上にするビュー。NSScrollView に縦積みの設定項目を載せるために使う。
@@ -23,6 +24,7 @@ final class SettingsWindowController: NSWindowController {
     private let soundPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let soundLoopCheckbox = NSButton(checkboxWithTitle: "", target: nil, action: nil)
     private let fontPopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let launchAtLoginCheckbox = NSButton(checkboxWithTitle: "ログイン時に開く", target: nil, action: nil)
     private let quietHoursCheckbox = NSButton()
     private let quietStartPicker = NSDatePicker()
     private let quietEndPicker = NSDatePicker()
@@ -70,6 +72,12 @@ final class SettingsWindowController: NSWindowController {
     deinit {
         if let screenObserver { NotificationCenter.default.removeObserver(screenObserver) }
         quietStatusTimer?.invalidate()
+    }
+
+    override func showWindow(_ sender: Any?) {
+        // 他の場所（システム設定）で変更されている場合があるので開くたびに読み直す。
+        updateLaunchAtLoginCheckbox()
+        super.showWindow(sender)
     }
 
     func updateStatus(_ status: NotificationMonitor.Status) {
@@ -150,6 +158,11 @@ final class SettingsWindowController: NSWindowController {
         } ?? 0
         fontPopup.selectItem(at: selectedFontIndex)
         let fontFamilyRow = makePopupRow(label: "フォント", popup: fontPopup)
+
+        launchAtLoginCheckbox.target = self
+        launchAtLoginCheckbox.action = #selector(launchAtLoginChanged(_:))
+        launchAtLoginCheckbox.toolTip = "macOS のログイン項目に登録します。"
+        updateLaunchAtLoginCheckbox()
 
         let clickThrough = NSButton(
             checkboxWithTitle: "ティッカー上のクリックを背後へ通す",
@@ -302,7 +315,7 @@ final class SettingsWindowController: NSWindowController {
 
         let stack = NSStackView(views: [
             title, header, separator(), edgeRow, displayRow,
-            opacity, speed, fontFamilyRow, font, clickThrough, ignoreClockWeatherWidgets,
+            opacity, speed, fontFamilyRow, font, launchAtLoginCheckbox, clickThrough, ignoreClockWeatherWidgets,
             separator(), quietHoursCheckbox, quietTimeRow, earthquakeRow, earthquakeIntensityRow,
             earthquakeSoundRow,
             soundEnabled, soundRow, importSoundButton, bottomRow
@@ -560,6 +573,33 @@ final class SettingsWindowController: NSWindowController {
     @objc private func fontFamilyChanged(_ sender: NSPopUpButton) {
         guard let family = sender.selectedItem?.representedObject as? String else { return }
         settings.fontFamily = family
+    }
+
+    /// ログイン項目の登録状態は macOS 側が持つので、設定には保存せず都度読み出す。
+    private func updateLaunchAtLoginCheckbox() {
+        launchAtLoginCheckbox.state = SMAppService.mainApp.status == .enabled ? .on : .off
+    }
+
+    @objc private func launchAtLoginChanged(_ sender: NSButton) {
+        let service = SMAppService.mainApp
+        do {
+            if sender.state == .on {
+                try service.register()
+            } else {
+                try service.unregister()
+            }
+        } catch {
+            let alert = NSAlert()
+            alert.messageText = "ログイン項目を変更できませんでした"
+            alert.informativeText = """
+            \(error.localizedDescription)
+
+            アプリケーションフォルダに置いたうえで、システム設定 → 一般 → ログイン項目 から追加してください。
+            """
+            alert.alertStyle = .warning
+            alert.runModal()
+        }
+        updateLaunchAtLoginCheckbox()
     }
 
     @objc private func clickThroughChanged(_ sender: NSButton) {
