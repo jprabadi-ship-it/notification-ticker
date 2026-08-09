@@ -43,6 +43,16 @@ final class FeedXMLParserTests: XCTestCase {
         XCTAssertNotNil(feed?.items.first?.publishedAt)
     }
 
+    func testHeadlineKeepsPublishedTime() {
+        let item = FeedItem(
+            title: "見出し",
+            identifier: "id-1",
+            publishedAt: Date(timeIntervalSince1970: 0)
+        )
+
+        XCTAssertTrue(FeedMonitor.headline(feedTitle: "フィード", item: item).hasSuffix("見出し"))
+    }
+
     func testDetectsEarthquakeHeadlines() {
         XCTAssertTrue(FeedMonitor.isEarthquakeHeadline("千葉県東方沖で震度1の地震"))
         XCTAssertTrue(FeedMonitor.isEarthquakeHeadline("津波注意報を解除"))

@@ -136,12 +136,22 @@ final class FeedMonitor {
     private let queue = DispatchQueue(label: "jp.local.NotificationTicker.feeds", qos: .utility)
     private let session: URLSession
     private var timer: DispatchSourceTimer?
-    private var seenIdentifiers = Set<String>()
-    private var primedURLs = Set<String>()
+    /// 表示済みの記事ID。再起動しても同じ記事を流し直さないよう永続化する。
+    private var seenIdentifiers: Set<String>
+    private var primedURLs: Set<String>
+    private let seenKey = "feedSeenIdentifiers"
+    private let primedKey = "feedPrimedURLs"
+    /// 記録しておく記事IDの上限。フィードの件数に対して十分な余裕を持たせる。
+    private let seenLimit = 500
+    /// この時間より古い記事は、新規に見つかっても表示しない。
+    private let staleAge: TimeInterval = 6 * 60 * 60
     private var isPausedForQuietHours = false
 
     init(settings: TickerSettings) {
         self.settings = settings
+        let defaults = UserDefaults.standard
+        seenIdentifiers = Set(defaults.stringArray(forKey: seenKey) ?? [])
+        primedURLs = Set(defaults.stringArray(forKey: primedKey) ?? [])
         let configuration = URLSessionConfiguration.ephemeral
         configuration.timeoutIntervalForRequest = 20
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
@@ -246,6 +256,19 @@ final class FeedMonitor {
         }
     }
 
+    /// 発行時刻が分かっていて、かつ古すぎる記事は「新着」とみなさない。
+    /// フィードの並び替えで再登場した過去記事が、朝の時刻のまま流れるのを防ぐ。
+    private func isStale(_ item: FeedItem, now: Date = Date()) -> Bool {
+        guard let publishedAt = item.publishedAt else { return false }
+        return now.timeIntervalSince(publishedAt) > staleAge
+    }
+
+    private func persistSeen() {
+        let defaults = UserDefaults.standard
+        defaults.set(Array(seenIdentifiers.suffix(seenLimit)), forKey: seenKey)
+        defaults.set(Array(primedURLs), forKey: primedKey)
+    }
+
     private func consume(feed: ParsedFeed, urlString: String, showLatest: Bool) {
         let skipsEarthquakeNews = settings.feedIgnoresEarthquakeNews
         if showLatest {
@@ -261,10 +284,15 @@ final class FeedMonitor {
             let newItems = feed.items.filter { !seenIdentifiers.contains($0.identifier) }
             for item in newItems.prefix(10).reversed() {
                 seenIdentifiers.insert(item.identifier)
+                if isStale(item) { continue }
                 if skipsEarthquakeNews, Self.isEarthquakeHeadline(item.title) { continue }
                 publishHeadline(Self.headline(feedTitle: feed.title, item: item), urlString: urlString)
             }
         }
+        if seenIdentifiers.count > seenLimit {
+            seenIdentifiers = Set(seenIdentifiers.suffix(seenLimit))
+        }
+        persistSeen()
         publishStatus("最終取得: \(feed.title)（\(feed.items.count)件）")
     }
 

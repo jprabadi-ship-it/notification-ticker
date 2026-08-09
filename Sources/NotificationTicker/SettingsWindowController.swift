@@ -44,7 +44,7 @@ final class SettingsWindowController: NSWindowController {
             backing: .buffered,
             defer: false
         )
-        window.title = "通知ティッカー設定"
+        window.title = "Notification Ticker 設定"
         window.minSize = NSSize(width: 520, height: 420)
         // 項目が増えて画面に収まらない場合に備え、可視領域より高くしない。
         if let visible = NSScreen.main?.visibleFrame {
@@ -92,7 +92,7 @@ final class SettingsWindowController: NSWindowController {
     private func buildInterface() {
         guard let content = window?.contentView else { return }
 
-        let title = NSTextField(labelWithString: "画面端の通知ティッカー")
+        let title = NSTextField(labelWithString: "Notification Ticker")
         title.font = .systemFont(ofSize: 20, weight: .semibold)
 
         statusLabel.font = .systemFont(ofSize: 13, weight: .medium)

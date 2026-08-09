@@ -168,7 +168,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func configureStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         if let button = statusItem.button {
-            button.image = NSImage(systemSymbolName: "text.line.first.and.arrowtriangle.forward", accessibilityDescription: "通知ティッカー")
+            button.image = NSImage(systemSymbolName: "text.line.first.and.arrowtriangle.forward", accessibilityDescription: "Notification Ticker")
         }
 
         let menu = NSMenu()
@@ -205,7 +205,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         tickerController.enqueue(
             TickerTextLayout.insertingTime(
                 Date(),
-                into: "メッセージ  •  通知ティッカーのテスト表示です  •  背景透明度と速度は設定画面で変更できます"
+                into: "メッセージ  •  Notification Ticker のテスト表示です  •  背景透明度と速度は設定画面で変更できます"
             ),
             badge: TickerTextStyler.notificationBadge
         )
