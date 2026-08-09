@@ -25,6 +25,7 @@ final class SettingsWindowController: NSWindowController {
     private let soundLoopCheckbox = NSButton(checkboxWithTitle: "", target: nil, action: nil)
     private let fontPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let launchAtLoginCheckbox = NSButton(checkboxWithTitle: "ログイン時に開く", target: nil, action: nil)
+    private let soundsFolderLabel = NSTextField(labelWithString: "")
     private let quietHoursCheckbox = NSButton()
     private let quietStartPicker = NSDatePicker()
     private let quietEndPicker = NSDatePicker()
@@ -281,6 +282,25 @@ final class SettingsWindowController: NSWindowController {
         let importSoundButton = NSButton(title: "MP3を追加…", target: self, action: #selector(importMP3))
         importSoundButton.bezelStyle = .rounded
 
+        soundsFolderLabel.lineBreakMode = .byTruncatingHead
+        soundsFolderLabel.textColor = .secondaryLabelColor
+        soundsFolderLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        soundsFolderLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        updateSoundsFolderLabel()
+        let chooseFolderButton = NSButton(title: "変更…", target: self, action: #selector(chooseSoundsFolder))
+        chooseFolderButton.bezelStyle = .rounded
+        let resetFolderButton = NSButton(title: "既定に戻す", target: self, action: #selector(resetSoundsFolder))
+        resetFolderButton.bezelStyle = .rounded
+        let soundsFolderNameLabel = NSTextField(labelWithString: "MP3の保存先")
+        soundsFolderNameLabel.widthAnchor.constraint(equalToConstant: 120).isActive = true
+        let soundsFolderRow = NSStackView(views: [
+            soundsFolderNameLabel, soundsFolderLabel, chooseFolderButton, resetFolderButton
+        ])
+        soundsFolderRow.orientation = .horizontal
+        soundsFolderRow.alignment = .centerY
+        soundsFolderRow.distribution = .fill
+        soundsFolderRow.spacing = 10
+
         let testButton = NSButton(title: "テスト表示", target: self, action: #selector(showTest))
         testButton.bezelStyle = .rounded
         let feedsButton = NSButton(title: "ニュース／RSSフィード…", target: self, action: #selector(showFeeds))
@@ -318,7 +338,7 @@ final class SettingsWindowController: NSWindowController {
             opacity, speed, fontFamilyRow, font, launchAtLoginCheckbox, clickThrough, ignoreClockWeatherWidgets,
             separator(), quietHoursCheckbox, quietTimeRow, earthquakeRow, earthquakeIntensityRow,
             earthquakeSoundRow,
-            soundEnabled, soundRow, importSoundButton, bottomRow
+            soundEnabled, soundRow, soundsFolderRow, importSoundButton, bottomRow
         ])
         stack.orientation = .vertical
         stack.alignment = .leading
@@ -360,6 +380,7 @@ final class SettingsWindowController: NSWindowController {
             edgeRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
             displayRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
             soundRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            soundsFolderRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
             header.widthAnchor.constraint(equalTo: stack.widthAnchor),
             soundTestButton.trailingAnchor.constraint(equalTo: soundRow.trailingAnchor),
             bottomRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
@@ -476,12 +497,9 @@ final class SettingsWindowController: NSWindowController {
 
     private func importSoundFiles(_ urls: [URL]) throws -> [String] {
         let manager = FileManager.default
-        guard let support = manager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
+        guard let directory = settings.soundsFolder else {
             throw CocoaError(.fileNoSuchFile)
         }
-        let directory = support
-            .appendingPathComponent("NotificationTicker", isDirectory: true)
-            .appendingPathComponent("Sounds", isDirectory: true)
         try manager.createDirectory(at: directory, withIntermediateDirectories: true)
 
         var imported: [String] = []
@@ -727,6 +745,52 @@ final class SettingsWindowController: NSWindowController {
         onTestSound?()
     }
 
+    /// 保存先はパスが長くなりがちなので、ホーム配下は ~ に省略して表示する。
+    private func updateSoundsFolderLabel() {
+        let path = settings.soundsFolder?.path ?? "(取得できません)"
+        soundsFolderLabel.stringValue = (path as NSString).abbreviatingWithTildeInPath
+        soundsFolderLabel.toolTip = path
+    }
+
+    @objc private func chooseSoundsFolder() {
+        let panel = NSOpenPanel()
+        panel.title = "MP3のコピー先フォルダを選択"
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.canCreateDirectories = true
+        panel.allowsMultipleSelection = false
+        if let current = settings.soundsFolder, FileManager.default.fileExists(atPath: current.path) {
+            panel.directoryURL = current
+        }
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        // 書き込めない場所を選ぶと、追加のたびに失敗するので先に確かめる。
+        guard FileManager.default.isWritableFileDirectory(url) else {
+            let alert = NSAlert()
+            alert.messageText = "そのフォルダには書き込めません"
+            alert.informativeText = "書き込み可能な別のフォルダを選んでください。"
+            alert.alertStyle = .warning
+            alert.runModal()
+            return
+        }
+        settings.soundsFolderPath = url.path
+        applySoundsFolderChange()
+    }
+
+    @objc private func resetSoundsFolder() {
+        settings.soundsFolderPath = ""
+        applySoundsFolderChange()
+    }
+
+    /// 保存先を切り替えたら、登録済みのMP3も新しい保存先へ集約する。
+    private func applySoundsFolderChange() {
+        settings.consolidateSoundsIntoFolder()
+        reloadSoundPopup()
+        reloadEarthquakeSoundPopup()
+        updateSoundLoopCheckbox()
+        updateSoundsFolderLabel()
+    }
+
     @objc private func importMP3() {
         let panel = NSOpenPanel()
         panel.title = "通知音に使うMP3を選択"
@@ -766,5 +830,16 @@ final class SettingsWindowController: NSWindowController {
 
     private func updateFontLabel() {
         fontValue.stringValue = "\(Int(settings.fontSize)) pt"
+    }
+}
+
+private extension FileManager {
+    /// 選んだフォルダが実在し、かつ書き込めるか。
+    func isWritableFileDirectory(_ url: URL) -> Bool {
+        var isDirectory: ObjCBool = false
+        guard fileExists(atPath: url.path, isDirectory: &isDirectory), isDirectory.boolValue else {
+            return false
+        }
+        return isWritableFile(atPath: url.path)
     }
 }

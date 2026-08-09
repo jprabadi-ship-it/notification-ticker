@@ -13,6 +13,7 @@ macOSの通知センターをアクセシビリティ経由で監視し、通知
 - 新しい通知を検出したときの通知音（オン／オフ、テスト再生）
 - システムサウンド一覧から新着通知音を選択
 - 任意のMP3を通知音として追加・保存・選択
+- 追加したMP3のコピー先フォルダを変更可能（既定は iCloud Drive の NotificationSounds。iCloud Drive が無効な環境では ~/Library/Application Support/NotificationTicker/Sounds）
 - 通知がない待機中はウィンドウを完全に非表示
 - ティッカー終了時に背景ごとフェードアウト
 - ティッカー非表示開始と同時に再生中の音声もフェードアウト

@@ -57,6 +57,7 @@ final class TickerSettings {
         static let soundSelection = "soundSelection"
         static let soundLoopSelections = "soundLoopSelections"
         static let customSoundPaths = "customSoundPaths"
+        static let soundsFolderPath = "soundsFolderPath"
         static let feedsEnabled = "feedsEnabled"
         static let feedURLs = "feedURLs"
         static let feedIntervalMinutes = "feedIntervalMinutes"
@@ -134,6 +135,84 @@ final class TickerSettings {
 
     var customSoundPaths: [String] {
         didSet { save(Key.customSoundPaths, customSoundPaths) }
+    }
+
+    /// 追加したMP3のコピー先。空なら既定の Application Support 配下を使う。
+    var soundsFolderPath: String {
+        didSet { save(Key.soundsFolderPath, soundsFolderPath) }
+    }
+
+    /// 既定のコピー先。iCloud Drive の NotificationSounds。
+    /// iCloud Drive が無効な環境では Application Support 配下へ切り替える。
+    static var defaultSoundsFolder: URL? {
+        let iCloudDocs = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Mobile Documents/com~apple~CloudDocs", isDirectory: true)
+        if FileManager.default.fileExists(atPath: iCloudDocs.path) {
+            return iCloudDocs.appendingPathComponent("NotificationSounds", isDirectory: true)
+        }
+        return FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
+            .appendingPathComponent("NotificationTicker", isDirectory: true)
+            .appendingPathComponent("Sounds", isDirectory: true)
+    }
+
+    /// 実際に使うコピー先。
+    var soundsFolder: URL? {
+        soundsFolderPath.isEmpty
+            ? Self.defaultSoundsFolder
+            : URL(fileURLWithPath: soundsFolderPath, isDirectory: true)
+    }
+
+    /// 登録済みのMP3のうち保存先フォルダの外にあるものを、フォルダ内へコピーして
+    /// 参照を書き換える。どこから選んだファイルでも、実体は保存先に揃う。
+    /// 元ファイルは消さない（利用者の Downloads などを勝手に触らない）。
+    func consolidateSoundsIntoFolder() {
+        guard let folder = soundsFolder else { return }
+        let manager = FileManager.default
+        let folderPath = folder.standardizedFileURL.path
+
+        var mapping: [String: String] = [:]
+        var newPaths: [String] = []
+        for path in customSoundPaths {
+            let standardized = URL(fileURLWithPath: path).standardizedFileURL.path
+            if standardized.hasPrefix(folderPath + "/") || !manager.fileExists(atPath: standardized) {
+                newPaths.append(path)
+                continue
+            }
+            do {
+                try manager.createDirectory(at: folder, withIntermediateDirectories: true)
+                let source = URL(fileURLWithPath: standardized)
+                let baseName = source.deletingPathExtension().lastPathComponent
+                let ext = source.pathExtension
+                var destination = folder.appendingPathComponent("\(baseName).\(ext)")
+                var suffix = 2
+                while manager.fileExists(atPath: destination.path) {
+                    destination = folder.appendingPathComponent("\(baseName)-\(suffix).\(ext)")
+                    suffix += 1
+                }
+                try manager.copyItem(at: source, to: destination)
+                mapping[path] = destination.path
+                newPaths.append(destination.path)
+            } catch {
+                // コピーできなければ従来のパスのまま使い続ける。
+                newPaths.append(path)
+            }
+        }
+        guard !mapping.isEmpty else { return }
+
+        customSoundPaths = newPaths
+        for (old, new) in mapping {
+            let oldSelection = "file:\(old)"
+            let newSelection = "file:\(new)"
+            if soundSelection == oldSelection { soundSelection = newSelection }
+            if earthquakeSoundSelection == oldSelection { earthquakeSoundSelection = newSelection }
+            for (url, selection) in feedSoundSelections where selection == oldSelection {
+                feedSoundSelections[url] = newSelection
+            }
+            if let loops = soundLoopSelections.removeValue(forKey: oldSelection) {
+                soundLoopSelections[newSelection] = loops
+            }
+        }
     }
 
     var feedsEnabled: Bool {
@@ -220,6 +299,7 @@ final class TickerSettings {
             Key.soundSelection: "system:Glass",
             Key.soundLoopSelections: [String: Bool](),
             Key.customSoundPaths: [],
+            Key.soundsFolderPath: "",
             Key.feedsEnabled: false,
             Key.feedURLs: [],
             Key.feedIntervalMinutes: 5.0,
@@ -260,6 +340,7 @@ final class TickerSettings {
         soundSelection = defaults.string(forKey: Key.soundSelection) ?? "system:Glass"
         soundLoopSelections = defaults.dictionary(forKey: Key.soundLoopSelections) as? [String: Bool] ?? [:]
         customSoundPaths = defaults.stringArray(forKey: Key.customSoundPaths) ?? []
+        soundsFolderPath = defaults.string(forKey: Key.soundsFolderPath) ?? ""
         feedsEnabled = defaults.bool(forKey: Key.feedsEnabled)
         feedURLs = defaults.stringArray(forKey: Key.feedURLs) ?? []
         feedIntervalMinutes = defaults.double(forKey: Key.feedIntervalMinutes)

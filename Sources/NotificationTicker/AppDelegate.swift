@@ -22,6 +22,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let deduplicator = MessageDeduplicator()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // 保存先の外にある登録済みMP3を、保存先へ集約してから各画面を組み立てる。
+        settings.consolidateSoundsIntoFolder()
         tickerController = TickerPanelController(settings: settings)
         tickerController.onTickerWillHide = { [weak self] in self?.fadeOutNotificationSound() }
         tickerController.onTickerDidShow = { [weak self] in
