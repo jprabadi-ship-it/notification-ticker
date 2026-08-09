@@ -61,6 +61,7 @@ final class TickerSettings {
         static let feedURLs = "feedURLs"
         static let feedIntervalMinutes = "feedIntervalMinutes"
         static let feedSoundSelections = "feedSoundSelections"
+        static let feedIgnoresEarthquakeNews = "feedIgnoresEarthquakeNews"
         static let earthquakeAlertsEnabled = "earthquakeAlertsEnabled"
         static let earthquakeMinimumIntensity = "earthquakeMinimumIntensity"
         static let earthquakeSoundSelection = "earthquakeSoundSelection"
@@ -156,6 +157,11 @@ final class TickerSettings {
         feedSoundSelections[urlString]
     }
 
+    /// ニュースフィードの地震関連の見出しを捨てるか。地震は気象庁の速報が担当する。
+    var feedIgnoresEarthquakeNews: Bool {
+        didSet { save(Key.feedIgnoresEarthquakeNews, feedIgnoresEarthquakeNews) }
+    }
+
     var earthquakeAlertsEnabled: Bool {
         didSet { save(Key.earthquakeAlertsEnabled, earthquakeAlertsEnabled) }
     }
@@ -218,6 +224,7 @@ final class TickerSettings {
             Key.feedURLs: [],
             Key.feedIntervalMinutes: 5.0,
             Key.feedSoundSelections: [String: String](),
+            Key.feedIgnoresEarthquakeNews: false,
             Key.earthquakeAlertsEnabled: true,
             Key.earthquakeMinimumIntensity: "4",
             Key.earthquakeSoundSelection: "",
@@ -257,6 +264,7 @@ final class TickerSettings {
         feedURLs = defaults.stringArray(forKey: Key.feedURLs) ?? []
         feedIntervalMinutes = defaults.double(forKey: Key.feedIntervalMinutes)
         feedSoundSelections = defaults.dictionary(forKey: Key.feedSoundSelections) as? [String: String] ?? [:]
+        feedIgnoresEarthquakeNews = defaults.bool(forKey: Key.feedIgnoresEarthquakeNews)
         earthquakeAlertsEnabled = defaults.bool(forKey: Key.earthquakeAlertsEnabled)
         earthquakeMinimumIntensity = defaults.string(forKey: Key.earthquakeMinimumIntensity) ?? "4"
         earthquakeSoundSelection = defaults.string(forKey: Key.earthquakeSoundSelection) ?? ""

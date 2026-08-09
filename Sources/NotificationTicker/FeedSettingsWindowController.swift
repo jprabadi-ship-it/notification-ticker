@@ -8,6 +8,7 @@ final class FeedSettingsWindowController: NSWindowController, NSTableViewDataSou
     private let urlField = NSTextField()
     private let statusLabel = NSTextField(labelWithString: "")
     private let enabledCheckbox = NSButton(checkboxWithTitle: "ニュースフィードを表示する", target: nil, action: nil)
+    private let skipEarthquakeCheckbox = NSButton()
     private let intervalPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     var onRefresh: (() -> Void)?
     var onRefreshURL: ((String) -> Void)?
@@ -148,6 +149,12 @@ final class FeedSettingsWindowController: NSWindowController, NSTableViewDataSou
         } ?? 0
         intervalPopup.selectItem(at: selectedInterval)
 
+        skipEarthquakeCheckbox.title = "地震関連の見出しは表示しない（地震は気象庁の速報で表示）"
+        skipEarthquakeCheckbox.setButtonType(.switch)
+        skipEarthquakeCheckbox.target = self
+        skipEarthquakeCheckbox.action = #selector(skipEarthquakeChanged(_:))
+        skipEarthquakeCheckbox.state = settings.feedIgnoresEarthquakeNews ? .on : .off
+
         let topRow = NSStackView(views: [enabledCheckbox, intervalLabel, intervalPopup])
         topRow.orientation = .horizontal
         topRow.alignment = .centerY
@@ -213,7 +220,7 @@ final class FeedSettingsWindowController: NSWindowController, NSTableViewDataSou
         note.textColor = .secondaryLabelColor
         note.font = .systemFont(ofSize: 11)
 
-        let stack = NSStackView(views: [topRow, scrollView, inputRow, actionRow, statusLabel, note])
+        let stack = NSStackView(views: [topRow, skipEarthquakeCheckbox, scrollView, inputRow, actionRow, statusLabel, note])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 12
@@ -233,6 +240,10 @@ final class FeedSettingsWindowController: NSWindowController, NSTableViewDataSou
             statusLabel.widthAnchor.constraint(equalTo: stack.widthAnchor),
             note.widthAnchor.constraint(equalTo: stack.widthAnchor)
         ])
+    }
+
+    @objc private func skipEarthquakeChanged(_ sender: NSButton) {
+        settings.feedIgnoresEarthquakeNews = sender.state == .on
     }
 
     @objc private func enabledChanged(_ sender: NSButton) {

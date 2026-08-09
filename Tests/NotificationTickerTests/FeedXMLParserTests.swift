@@ -43,6 +43,17 @@ final class FeedXMLParserTests: XCTestCase {
         XCTAssertNotNil(feed?.items.first?.publishedAt)
     }
 
+    func testDetectsEarthquakeHeadlines() {
+        XCTAssertTrue(FeedMonitor.isEarthquakeHeadline("千葉県東方沖で震度1の地震"))
+        XCTAssertTrue(FeedMonitor.isEarthquakeHeadline("津波注意報を解除"))
+        XCTAssertTrue(FeedMonitor.isEarthquakeHeadline("緊急地震速報を発表"))
+    }
+
+    func testKeepsUnrelatedHeadlines() {
+        XCTAssertFalse(FeedMonitor.isEarthquakeHeadline("日経平均が続伸"))
+        XCTAssertFalse(FeedMonitor.isEarthquakeHeadline("台風5号が接近"))
+    }
+
     func testParsesPublishedTimeAndBuildsSingleLineHeadline() {
         let xml = """
         <rss version="2.0"><channel><title>NHKニュース</title>

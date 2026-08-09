@@ -247,9 +247,11 @@ final class FeedMonitor {
     }
 
     private func consume(feed: ParsedFeed, urlString: String, showLatest: Bool) {
+        let skipsEarthquakeNews = settings.feedIgnoresEarthquakeNews
         if showLatest {
             for item in feed.items.prefix(5).reversed() {
                 seenIdentifiers.insert(item.identifier)
+                if skipsEarthquakeNews, Self.isEarthquakeHeadline(item.title) { continue }
                 publishHeadline(Self.headline(feedTitle: feed.title, item: item), urlString: urlString)
             }
         } else if !primedURLs.contains(urlString) {
@@ -259,10 +261,17 @@ final class FeedMonitor {
             let newItems = feed.items.filter { !seenIdentifiers.contains($0.identifier) }
             for item in newItems.prefix(10).reversed() {
                 seenIdentifiers.insert(item.identifier)
+                if skipsEarthquakeNews, Self.isEarthquakeHeadline(item.title) { continue }
                 publishHeadline(Self.headline(feedTitle: feed.title, item: item), urlString: urlString)
             }
         }
         publishStatus("最終取得: \(feed.title)（\(feed.items.count)件）")
+    }
+
+    /// 地震・津波に関する見出しかどうか。気象庁の速報と二重に流れるのを避けるために使う。
+    static func isEarthquakeHeadline(_ title: String) -> Bool {
+        let markers = ["震度", "地震", "津波", "震源", "余震", "緊急地震速報"]
+        return markers.contains { title.contains($0) }
     }
 
     /// 「発行時刻 • 見出し」の1行を組み立てる。フィード名は表示しない。
