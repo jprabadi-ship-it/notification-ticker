@@ -8,6 +8,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var feedSettingsController: FeedSettingsWindowController!
     private var feedMonitor: FeedMonitor!
     private var earthquakeMonitor: JMAEarthquakeMonitor!
+    private var eewMonitor: EEWMonitor!
     private var statusItem: NSStatusItem!
     private var statusMenuItem: NSMenuItem!
     private var toggleMenuItem: NSMenuItem!
@@ -40,6 +41,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settingsController = SettingsWindowController(settings: settings, monitor: monitor)
         feedMonitor = FeedMonitor(settings: settings)
         earthquakeMonitor = JMAEarthquakeMonitor(settings: settings)
+        eewMonitor = EEWMonitor(settings: settings)
         feedSettingsController = FeedSettingsWindowController(settings: settings)
         settingsController.onTest = { [weak self] in self?.showTestMessage() }
         settingsController.onTestSound = { [weak self] in
@@ -112,6 +114,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         earthquakeMonitor.onStatusChange = { [weak self] status in
             self?.settingsController.updateEarthquakeStatus(status)
         }
+        eewMonitor.onReport = { [weak self] report in
+            guard let self else { return }
+            guard !self.isQuietHoursActive else { return }
+            let localArea = self.settings.effectiveLocalAreaName
+            guard report.meetsThreshold(
+                minimumIntensity: self.settings.eewMinimumIntensity,
+                localArea: localArea
+            ) else { return }
+            guard let text = report.tickerText(localArea: localArea) else { return }
+            // 続報ごとに内容が変わるため、共通の重複判定は通さない。
+            self.tickerController.enqueue(
+                TickerTextLayout.insertingTime(Date(), into: text),
+                badge: TickerTextStyler.earthquakeEvacuationBadge,
+                soundSelection: self.settings.effectiveEarthquakeSoundSelection
+            )
+        }
+        eewMonitor.onStatusChange = { [weak self] status in
+            self?.settingsController.updateEEWStatus(status)
+        }
+        eewMonitor.configure()
 
         installEditMenu()
         configureStatusItem()
@@ -129,6 +151,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         monitor.stop()
         feedMonitor.stop()
         earthquakeMonitor.stop()
+        eewMonitor.stop()
         quietHoursTimer?.invalidate()
     }
 
@@ -315,6 +338,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             fadeOutNotificationSound()
         }
         updateToggleMenuItem()
+        if !isQuietHoursActive { eewMonitor.configure() }
         updateQuietHoursState(force: true)
     }
 
@@ -329,6 +353,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             monitor.pauseForQuietHours()
             feedMonitor.pauseForQuietHours()
             earthquakeMonitor.pauseForQuietHours()
+            eewMonitor.stop()
             statusMenuItem.title = NotificationMonitor.Status.pausedForQuietHours.label
             settingsController.updateStatus(.pausedForQuietHours)
         } else {
@@ -337,6 +362,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             monitor.start()
             feedMonitor.configure()
             earthquakeMonitor.configure()
+            eewMonitor.configure()
             previewNHKAfterFeedBehaviorUpgradeIfNeeded()
         }
     }

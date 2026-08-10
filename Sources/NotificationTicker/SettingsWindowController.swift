@@ -21,6 +21,9 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
     private let earthquakeLoopCheckbox = NSButton(checkboxWithTitle: "この音をループ再生", target: nil, action: nil)
     private let localAreaCheckbox = NSButton(checkboxWithTitle: "自分の地点の震度も表示", target: nil, action: nil)
     private let localAreaField = NSTextField()
+    private let eewCheckbox = NSButton(checkboxWithTitle: "緊急地震速報（揺れる前の予測）を表示", target: nil, action: nil)
+    private let eewIntensityPopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let eewStatusLabel = NSTextField(labelWithString: "")
     private let edgePopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let displayPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let soundPopup = NSPopUpButton(frame: .zero, pullsDown: false)
@@ -98,6 +101,10 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
 
     func updateEarthquakeStatus(_ status: String) {
         earthquakeStatusLabel.stringValue = status
+    }
+
+    func updateEEWStatus(_ status: String) {
+        eewStatusLabel.stringValue = status
     }
 
     private func buildInterface() {
@@ -244,6 +251,34 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         localAreaField.toolTip = "気象庁が発表する地域名と突き合わせます。市区町村が無ければ都道府県の震度を表示します。"
         let localAreaRow = makePopupRowLike(label: "自分の地点", field: localAreaField)
 
+        eewCheckbox.target = self
+        eewCheckbox.action = #selector(eewEnabledChanged(_:))
+        eewCheckbox.state = settings.eewEnabled ? .on : .off
+        eewCheckbox.toolTip = "P2P地震情報から緊急地震速報を受け取ります。予測値のため外れることがあり、公式の防災情報提供手段ではありません。"
+        eewStatusLabel.textColor = .secondaryLabelColor
+        eewStatusLabel.alignment = .right
+        let eewRow = NSStackView(views: [eewCheckbox, eewStatusLabel])
+        eewRow.orientation = .horizontal
+        eewRow.alignment = .centerY
+        eewRow.distribution = .fill
+        eewRow.spacing = 10
+
+        eewIntensityPopup.removeAllItems()
+        for intensity in JMAEarthquakeReport.selectableIntensities {
+            eewIntensityPopup.addItem(withTitle: "震度\(intensity)以上")
+            eewIntensityPopup.lastItem?.representedObject = intensity
+        }
+        eewIntensityPopup.target = self
+        eewIntensityPopup.action = #selector(eewIntensityChanged(_:))
+        if let selected = eewIntensityPopup.itemArray.first(where: {
+            ($0.representedObject as? String) == settings.eewMinimumIntensity
+        }) {
+            eewIntensityPopup.select(selected)
+        } else {
+            eewIntensityPopup.selectItem(at: 0)
+        }
+        let eewIntensityRow = makePopupRow(label: "予測震度の下限", popup: eewIntensityPopup)
+
         let earthquakeSoundRow = NSStackView(views: [
             {
                 let label = NSTextField(labelWithString: "地震の効果音")
@@ -352,6 +387,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
             opacity, speed, fontFamilyRow, font, launchAtLoginCheckbox, clickThrough, ignoreClockWeatherWidgets,
             separator(), quietHoursCheckbox, quietTimeRow, earthquakeRow, earthquakeIntensityRow,
             localAreaCheckbox, localAreaRow, earthquakeSoundRow,
+            eewRow, eewIntensityRow,
             soundEnabled, soundRow, soundsFolderRow, importSoundButton, bottomRow
         ])
         stack.orientation = .vertical
@@ -392,6 +428,8 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
             earthquakeIntensityRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
             earthquakeSoundRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
             localAreaRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            eewRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            eewIntensityRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
             edgeRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
             displayRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
             soundRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
@@ -726,6 +764,16 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
             : settings.earthquakeSoundSelection
     }
 
+    @objc private func eewEnabledChanged(_ sender: NSButton) {
+        settings.eewEnabled = sender.state == .on
+        updateEarthquakeUI()
+    }
+
+    @objc private func eewIntensityChanged(_ sender: NSPopUpButton) {
+        guard let intensity = sender.selectedItem?.representedObject as? String else { return }
+        settings.eewMinimumIntensity = intensity
+    }
+
     @objc private func localAreaEnabledChanged(_ sender: NSButton) {
         settings.localAreaEnabled = sender.state == .on
         updateEarthquakeUI()
@@ -758,6 +806,8 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         let enabled = settings.earthquakeAlertsEnabled
         localAreaCheckbox.isEnabled = enabled
         localAreaField.isEnabled = enabled && settings.localAreaEnabled
+        eewIntensityPopup.isEnabled = settings.eewEnabled
+        if !settings.eewEnabled { eewStatusLabel.stringValue = "緊急地震速報は停止中" }
         earthquakeIntensityPopup.isEnabled = enabled
         earthquakeSoundPopup.isEnabled = enabled
         earthquakeLoopCheckbox.isEnabled = enabled

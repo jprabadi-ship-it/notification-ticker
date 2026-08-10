@@ -68,6 +68,8 @@ final class TickerSettings {
         static let earthquakeSoundSelection = "earthquakeSoundSelection"
         static let localAreaEnabled = "localAreaEnabled"
         static let localAreaName = "localAreaName"
+        static let eewEnabled = "eewEnabled"
+        static let eewMinimumIntensity = "eewMinimumIntensity"
         static let ignoresClockWeatherWidgets = "ignoresClockWeatherWidgets"
         static let quietHoursEnabled = "quietHoursEnabled"
         static let quietHoursStartMinutes = "quietHoursStartMinutes"
@@ -269,6 +271,16 @@ final class TickerSettings {
         return trimmed.isEmpty ? nil : trimmed
     }
 
+    /// 緊急地震速報（揺れる前の予測）を受け取るか。
+    var eewEnabled: Bool {
+        didSet { save(Key.eewEnabled, eewEnabled) }
+    }
+
+    /// 緊急地震速報を表示する予測震度の下限。
+    var eewMinimumIntensity: String {
+        didSet { save(Key.eewMinimumIntensity, eewMinimumIntensity) }
+    }
+
     /// 地震速報に使う効果音。空文字なら共通の通知音を使う。
     var earthquakeSoundSelection: String {
         didSet { save(Key.earthquakeSoundSelection, earthquakeSoundSelection) }
@@ -329,6 +341,8 @@ final class TickerSettings {
             Key.earthquakeSoundSelection: "",
             Key.localAreaEnabled: false,
             Key.localAreaName: "",
+            Key.eewEnabled: false,
+            Key.eewMinimumIntensity: "4",
             Key.ignoresClockWeatherWidgets: true,
             Key.quietHoursEnabled: false,
             Key.quietHoursStartMinutes: 23 * 60,
@@ -372,6 +386,8 @@ final class TickerSettings {
         earthquakeSoundSelection = defaults.string(forKey: Key.earthquakeSoundSelection) ?? ""
         localAreaEnabled = defaults.bool(forKey: Key.localAreaEnabled)
         localAreaName = defaults.string(forKey: Key.localAreaName) ?? ""
+        eewEnabled = defaults.bool(forKey: Key.eewEnabled)
+        eewMinimumIntensity = defaults.string(forKey: Key.eewMinimumIntensity) ?? "4"
         ignoresClockWeatherWidgets = defaults.bool(forKey: Key.ignoresClockWeatherWidgets)
         quietHoursEnabled = defaults.bool(forKey: Key.quietHoursEnabled)
         quietHoursStartMinutes = defaults.integer(forKey: Key.quietHoursStartMinutes)
