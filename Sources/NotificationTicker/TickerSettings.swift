@@ -66,6 +66,8 @@ final class TickerSettings {
         static let earthquakeAlertsEnabled = "earthquakeAlertsEnabled"
         static let earthquakeMinimumIntensity = "earthquakeMinimumIntensity"
         static let earthquakeSoundSelection = "earthquakeSoundSelection"
+        static let localAreaEnabled = "localAreaEnabled"
+        static let localAreaName = "localAreaName"
         static let ignoresClockWeatherWidgets = "ignoresClockWeatherWidgets"
         static let quietHoursEnabled = "quietHoursEnabled"
         static let quietHoursStartMinutes = "quietHoursStartMinutes"
@@ -250,6 +252,23 @@ final class TickerSettings {
         didSet { save(Key.earthquakeMinimumIntensity, earthquakeMinimumIntensity) }
     }
 
+    /// 地震速報に自分の地点の震度を添えるか。
+    var localAreaEnabled: Bool {
+        didSet { save(Key.localAreaEnabled, localAreaEnabled) }
+    }
+
+    /// 自分の地点。「東京都 練馬区」のように都道府県と市区町村を空白で区切って書く。
+    var localAreaName: String {
+        didSet { save(Key.localAreaName, localAreaName) }
+    }
+
+    /// 実際に突き合わせに使う地点。無効か未入力なら nil。
+    var effectiveLocalAreaName: String? {
+        guard localAreaEnabled else { return nil }
+        let trimmed = localAreaName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
     /// 地震速報に使う効果音。空文字なら共通の通知音を使う。
     var earthquakeSoundSelection: String {
         didSet { save(Key.earthquakeSoundSelection, earthquakeSoundSelection) }
@@ -308,6 +327,8 @@ final class TickerSettings {
             Key.earthquakeAlertsEnabled: true,
             Key.earthquakeMinimumIntensity: "4",
             Key.earthquakeSoundSelection: "",
+            Key.localAreaEnabled: false,
+            Key.localAreaName: "",
             Key.ignoresClockWeatherWidgets: true,
             Key.quietHoursEnabled: false,
             Key.quietHoursStartMinutes: 23 * 60,
@@ -349,6 +370,8 @@ final class TickerSettings {
         earthquakeAlertsEnabled = defaults.bool(forKey: Key.earthquakeAlertsEnabled)
         earthquakeMinimumIntensity = defaults.string(forKey: Key.earthquakeMinimumIntensity) ?? "4"
         earthquakeSoundSelection = defaults.string(forKey: Key.earthquakeSoundSelection) ?? ""
+        localAreaEnabled = defaults.bool(forKey: Key.localAreaEnabled)
+        localAreaName = defaults.string(forKey: Key.localAreaName) ?? ""
         ignoresClockWeatherWidgets = defaults.bool(forKey: Key.ignoresClockWeatherWidgets)
         quietHoursEnabled = defaults.bool(forKey: Key.quietHoursEnabled)
         quietHoursStartMinutes = defaults.integer(forKey: Key.quietHoursStartMinutes)

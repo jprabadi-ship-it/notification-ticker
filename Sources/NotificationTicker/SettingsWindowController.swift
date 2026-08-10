@@ -7,7 +7,7 @@ private final class FlippedView: NSView {
     override var isFlipped: Bool { true }
 }
 
-final class SettingsWindowController: NSWindowController {
+final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
     private let settings: TickerSettings
     private let monitor: NotificationMonitor
     private let statusLabel = NSTextField(labelWithString: "")
@@ -19,6 +19,8 @@ final class SettingsWindowController: NSWindowController {
     private let earthquakeIntensityPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let earthquakeSoundPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let earthquakeLoopCheckbox = NSButton(checkboxWithTitle: "この音をループ再生", target: nil, action: nil)
+    private let localAreaCheckbox = NSButton(checkboxWithTitle: "自分の地点の震度も表示", target: nil, action: nil)
+    private let localAreaField = NSTextField()
     private let edgePopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let displayPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let soundPopup = NSPopUpButton(frame: .zero, pullsDown: false)
@@ -230,6 +232,18 @@ final class SettingsWindowController: NSWindowController {
         earthquakeLoopCheckbox.target = self
         earthquakeLoopCheckbox.action = #selector(earthquakeLoopChanged(_:))
         reloadEarthquakeSoundPopup()
+        localAreaCheckbox.target = self
+        localAreaCheckbox.action = #selector(localAreaEnabledChanged(_:))
+        localAreaCheckbox.state = settings.localAreaEnabled ? .on : .off
+
+        localAreaField.stringValue = settings.localAreaName
+        localAreaField.placeholderString = "例: 東京都 練馬区"
+        localAreaField.target = self
+        localAreaField.action = #selector(localAreaNameChanged(_:))
+        localAreaField.delegate = self
+        localAreaField.toolTip = "気象庁が発表する地域名と突き合わせます。市区町村が無ければ都道府県の震度を表示します。"
+        let localAreaRow = makePopupRowLike(label: "自分の地点", field: localAreaField)
+
         let earthquakeSoundRow = NSStackView(views: [
             {
                 let label = NSTextField(labelWithString: "地震の効果音")
@@ -337,7 +351,7 @@ final class SettingsWindowController: NSWindowController {
             title, header, separator(), edgeRow, displayRow,
             opacity, speed, fontFamilyRow, font, launchAtLoginCheckbox, clickThrough, ignoreClockWeatherWidgets,
             separator(), quietHoursCheckbox, quietTimeRow, earthquakeRow, earthquakeIntensityRow,
-            earthquakeSoundRow,
+            localAreaCheckbox, localAreaRow, earthquakeSoundRow,
             soundEnabled, soundRow, soundsFolderRow, importSoundButton, bottomRow
         ])
         stack.orientation = .vertical
@@ -377,6 +391,7 @@ final class SettingsWindowController: NSWindowController {
             earthquakeRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
             earthquakeIntensityRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
             earthquakeSoundRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            localAreaRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
             edgeRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
             displayRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
             soundRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
@@ -386,6 +401,18 @@ final class SettingsWindowController: NSWindowController {
             bottomRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
             testButton.trailingAnchor.constraint(equalTo: bottomRow.trailingAnchor)
         ])
+    }
+
+    /// ラベル＋入力欄の行。ポップアップ行と幅と間隔を揃える。
+    private func makePopupRowLike(label: String, field: NSTextField) -> NSStackView {
+        let name = NSTextField(labelWithString: label)
+        name.widthAnchor.constraint(equalToConstant: 120).isActive = true
+        field.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        let row = NSStackView(views: [name, field])
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = 10
+        return row
     }
 
     private func makePopupRow(label: String, popup: NSPopUpButton) -> NSStackView {
@@ -699,6 +726,15 @@ final class SettingsWindowController: NSWindowController {
             : settings.earthquakeSoundSelection
     }
 
+    @objc private func localAreaEnabledChanged(_ sender: NSButton) {
+        settings.localAreaEnabled = sender.state == .on
+        updateEarthquakeUI()
+    }
+
+    @objc private func localAreaNameChanged(_ sender: NSTextField) {
+        settings.localAreaName = sender.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     @objc private func earthquakeSoundChanged(_ sender: NSPopUpButton) {
         guard let selection = sender.selectedItem?.representedObject as? String else { return }
         settings.earthquakeSoundSelection = selection
@@ -711,9 +747,17 @@ final class SettingsWindowController: NSWindowController {
         updateSoundLoopCheckbox()
     }
 
+    func controlTextDidEndEditing(_ obj: Notification) {
+        guard (obj.object as? NSTextField) === localAreaField else { return }
+        settings.localAreaName = localAreaField.stringValue
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     /// 下限震度は地震速報が有効なときだけ操作できる。状態表示も合わせて更新する。
     private func updateEarthquakeUI() {
         let enabled = settings.earthquakeAlertsEnabled
+        localAreaCheckbox.isEnabled = enabled
+        localAreaField.isEnabled = enabled && settings.localAreaEnabled
         earthquakeIntensityPopup.isEnabled = enabled
         earthquakeSoundPopup.isEnabled = enabled
         earthquakeLoopCheckbox.isEnabled = enabled

@@ -100,9 +100,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         earthquakeMonitor.onReport = { [weak self] report in
             guard let self else { return }
             guard !self.isQuietHoursActive else { return }
-            guard self.deduplicator.shouldEmit(report.tickerText) else { return }
+            let text = self.settings.effectiveLocalAreaName
+                .map { report.tickerText(localArea: $0) } ?? report.tickerText
+            guard self.deduplicator.shouldEmit(text) else { return }
             self.tickerController.enqueue(
-                TickerTextLayout.insertingTime(Date(), into: report.tickerText),
+                TickerTextLayout.insertingTime(Date(), into: text),
                 badge: TickerTextStyler.earthquakeBadge(forIntensity: report.maxIntensity),
                 soundSelection: self.settings.effectiveEarthquakeSoundSelection
             )

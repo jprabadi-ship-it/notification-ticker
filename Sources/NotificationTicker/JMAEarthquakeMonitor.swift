@@ -77,15 +77,47 @@ final class JMAFeedParser: NSObject, XMLParserDelegate {
     }
 }
 
+/// 都道府県・地域・市区町村ごとの最大震度。自分の地点を探すために使う。
+struct JMAAreaIntensity: Equatable {
+    let name: String
+    let intensity: String
+}
+
 struct JMAEarthquakeReport: Equatable {
     let eventID: String
     let hypocenter: String
     let magnitude: String
     let maxIntensity: String
     let tsunamiStatus: String
+    /// 細かい地域から先に並べる。市区町村が一致すればそちらを優先したいため。
+    var areaIntensities: [JMAAreaIntensity] = []
 
     var tickerText: String {
         "【地震】最大震度\(maxIntensity)  •  震源 \(hypocenter)  •  M\(magnitude)  •  津波\(tsunamiStatus)"
+    }
+
+    /// 自分の地点を含む地域名と、その震度。見つからなければ nil。
+    func localIntensity(matching area: String) -> JMAAreaIntensity? {
+        let key = area.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty else { return nil }
+        // 「東京都 練馬区」のように複数語で書かれても拾えるよう、語ごとに探す。
+        let words = key.split(whereSeparator: { $0 == " " || $0 == "　" }).map(String.init)
+        for word in words.reversed() where !word.isEmpty {
+            if let hit = areaIntensities.first(where: { $0.name.contains(word) || word.contains($0.name) }) {
+                return hit
+            }
+        }
+        return nil
+    }
+
+    /// 自分の地点の震度を添えた本文。地点が見つからなければ「観測なし」と出す。
+    func tickerText(localArea: String) -> String {
+        let trimmed = localArea.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return tickerText }
+        guard let local = localIntensity(matching: trimmed) else {
+            return tickerText + "  •  \(trimmed) 観測なし"
+        }
+        return tickerText + "  •  \(local.name) 震度\(local.intensity)"
     }
 
     /// 設定された下限震度に達しているか。
@@ -120,6 +152,9 @@ final class JMAEarthquakeXMLParser: NSObject, XMLParserDelegate {
     private var magnitude = "不明"
     private var maxIntensity = "0"
     private var forecastComment = ""
+    /// Pref / Area / City それぞれの直近の Name と MaxInt を組にする。
+    private var pendingNames: [String: String] = [:]
+    private var areaIntensities: [JMAAreaIntensity] = []
 
     static func parse(data: Data) -> JMAEarthquakeReport? {
         let delegate = JMAEarthquakeXMLParser()
@@ -131,7 +166,8 @@ final class JMAEarthquakeXMLParser: NSObject, XMLParserDelegate {
             hypocenter: delegate.hypocenter,
             magnitude: delegate.magnitude,
             maxIntensity: delegate.displayIntensity(delegate.maxIntensity),
-            tsunamiStatus: delegate.tsunamiStatus(delegate.forecastComment)
+            tsunamiStatus: delegate.tsunamiStatus(delegate.forecastComment),
+            areaIntensities: delegate.areaIntensities
         )
     }
 
@@ -159,6 +195,17 @@ final class JMAEarthquakeXMLParser: NSObject, XMLParserDelegate {
 
         if name == "eventid", !text.isEmpty { eventID = text }
         if name == "name", stack.contains("hypocenter"), !text.isEmpty { hypocenter = text }
+        // 観測情報の中の Pref / Area / City は、Name のあとに MaxInt が来る。
+        if name == "name", !text.isEmpty, let scope = observationScope() {
+            pendingNames[scope] = text
+        }
+        if name == "maxint", !text.isEmpty, let scope = observationScope(),
+           let areaName = pendingNames[scope] {
+            areaIntensities.append(
+                JMAAreaIntensity(name: areaName, intensity: displayIntensity(text))
+            )
+            pendingNames[scope] = nil
+        }
         if name == "magnitude", !text.isEmpty { magnitude = text }
         if name == "maxint", JMAEarthquakeReport.intensityRank(text) > JMAEarthquakeReport.intensityRank(maxIntensity) {
             maxIntensity = text
@@ -167,6 +214,15 @@ final class JMAEarthquakeXMLParser: NSObject, XMLParserDelegate {
 
         if !stack.isEmpty { stack.removeLast() }
         buffer = ""
+    }
+
+    /// いま読んでいる要素が属する観測単位。細かい方を優先して返す。
+    private func observationScope() -> String? {
+        guard stack.contains("observation") else { return nil }
+        for scope in ["city", "area", "pref"] where stack.contains(scope) {
+            return scope
+        }
+        return nil
     }
 
     private func tsunamiStatus(_ comment: String) -> String {
