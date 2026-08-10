@@ -735,15 +735,18 @@ final class TickerPanelController {
         if let globalScrollMonitor { NSEvent.removeMonitor(globalScrollMonitor) }
     }
 
+    /// `overridingSuppression` は緊急地震速報のように、睡眠時間帯でも必ず出すもの向け。
     func enqueue(
         _ text: String,
         badge: String = TickerTextStyler.badge,
         badgeColor: NSColor? = nil,
-        soundSelection: String? = nil
+        soundSelection: String? = nil,
+        overridingSuppression: Bool = false
     ) {
-        guard !isSuppressed else { return }
+        guard !isSuppressed || overridingSuppression else { return }
         tickerView.enqueue(text, badge: badge, badgeColor: badgeColor, soundSelection: soundSelection)
-        if settings.isEnabled { showPanel() }
+        guard settings.isEnabled else { return }
+        showPanel(overridingSuppression: overridingSuppression)
     }
 
     func applySettings() {
@@ -775,8 +778,8 @@ final class TickerPanelController {
         tickerView.clear()
     }
 
-    private func showPanel() {
-        guard !isSuppressed else { return }
+    private func showPanel(overridingSuppression: Bool = false) {
+        guard !isSuppressed || overridingSuppression else { return }
         fadeGeneration += 1
         NSAnimationContext.beginGrouping()
         NSAnimationContext.current.duration = 0

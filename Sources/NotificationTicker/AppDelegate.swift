@@ -19,6 +19,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var soundFadeTimer: Timer?
     private var quietHoursTimer: Timer?
     private var isQuietHoursActive = false
+    /// 緊急地震速報を出している間だけ、睡眠時間帯の停止を上書きする期限。
+    private var emergencyOverrideUntil: Date?
+    private var isEmergencyOverrideActive: Bool {
+        guard let until = emergencyOverrideUntil else { return false }
+        return until > Date()
+    }
     /// 発信元をまたいで、同じ本文の24時間以内の再表示を防ぐ。
     private let deduplicator = MessageDeduplicator()
 
@@ -116,18 +122,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         eewMonitor.onReport = { [weak self] report in
             guard let self else { return }
-            guard !self.isQuietHoursActive else { return }
             let localArea = self.settings.effectiveLocalAreaName
             guard report.meetsThreshold(
                 minimumIntensity: self.settings.eewMinimumIntensity,
                 localArea: localArea
             ) else { return }
             guard let text = report.tickerText(localArea: localArea) else { return }
+            // 揺れが来る前の知らせなので、睡眠時間帯でも表示して鳴らす。
+            self.emergencyOverrideUntil = Date().addingTimeInterval(60)
             // 続報ごとに内容が変わるため、共通の重複判定は通さない。
             self.tickerController.enqueue(
                 TickerTextLayout.insertingTime(Date(), into: text),
                 badge: TickerTextStyler.earthquakeEvacuationBadge,
-                soundSelection: self.settings.effectiveEarthquakeSoundSelection
+                soundSelection: self.settings.effectiveEarthquakeSoundSelection,
+                overridingSuppression: true
             )
         }
         eewMonitor.onStatusChange = { [weak self] status in
@@ -245,7 +253,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// `overriding` を渡すと、先頭メッセージの割り当てを無視して指定の音を鳴らす（試聴用）。
     private func playNotificationSound(looping: Bool, overriding: String? = nil) {
-        guard !isQuietHoursActive else { return }
+        guard !isQuietHoursActive || isEmergencyOverrideActive else { return }
         soundFadeTimer?.invalidate()
         soundFadeTimer = nil
         let selection = overriding ?? leadingSoundSelection ?? settings.soundSelection
@@ -353,7 +361,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             monitor.pauseForQuietHours()
             feedMonitor.pauseForQuietHours()
             earthquakeMonitor.pauseForQuietHours()
-            eewMonitor.stop()
+            // 緊急地震速報だけは止めない。揺れる前に知らせるためのもの。
+            eewMonitor.configure()
             statusMenuItem.title = NotificationMonitor.Status.pausedForQuietHours.label
             settingsController.updateStatus(.pausedForQuietHours)
         } else {
