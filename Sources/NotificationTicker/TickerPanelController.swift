@@ -230,6 +230,8 @@ final class TickerView: NSView {
         let badgeColor: NSColor
         /// このメッセージが先頭にいる間に鳴らす音。nil なら共通の通知音。
         let soundSelection: String?
+        /// ループの上書き。nil なら音源ごとの設定に従う。
+        let soundLoops: Bool?
         var x: CGFloat
         var width: CGFloat
         var lineCount: Int
@@ -245,7 +247,7 @@ final class TickerView: NSView {
     private var previousTimestamp = ProcessInfo.processInfo.systemUptime
     var onActivityChange: ((Bool) -> Void)?
     /// 先頭メッセージが入れ替わり、鳴らすべき音が変わったときに呼ばれる。
-    var onLeadingSoundChange: ((String?) -> Void)?
+    var onLeadingSoundChange: ((String?, Bool?) -> Void)?
     private var lastReportedSoundSelection: String??
     var onDoubleClick: (() -> Void)?
     var onContentMetricsChange: (() -> Void)?
@@ -292,7 +294,8 @@ final class TickerView: NSView {
         _ message: String,
         badge: String = TickerTextStyler.badge,
         badgeColor: NSColor? = nil,
-        soundSelection: String? = nil
+        soundSelection: String? = nil,
+        soundLoops: Bool? = nil
     ) {
         let cleaned = TickerTextLayout.titleAndContentLines(
             in: message.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -308,6 +311,7 @@ final class TickerView: NSView {
                 text: cleaned,
                 badgeColor: badgeColor ?? TickerTextStyler.backgroundColor(forBadge: badge),
                 soundSelection: soundSelection,
+                soundLoops: soundLoops,
                 x: startX,
                 width: measuredSize(of: cleaned).width,
                 lineCount: min(
@@ -327,7 +331,7 @@ final class TickerView: NSView {
         let selection = leadingSoundSelection
         if let last = lastReportedSoundSelection, last == selection { return }
         lastReportedSoundSelection = .some(selection)
-        onLeadingSoundChange?(selection)
+        onLeadingSoundChange?(selection, items.first?.soundLoops)
     }
 
     func clear() {
@@ -741,10 +745,17 @@ final class TickerPanelController {
         badge: String = TickerTextStyler.badge,
         badgeColor: NSColor? = nil,
         soundSelection: String? = nil,
+        soundLoops: Bool? = nil,
         overridingSuppression: Bool = false
     ) {
         guard !isSuppressed || overridingSuppression else { return }
-        tickerView.enqueue(text, badge: badge, badgeColor: badgeColor, soundSelection: soundSelection)
+        tickerView.enqueue(
+            text,
+            badge: badge,
+            badgeColor: badgeColor,
+            soundSelection: soundSelection,
+            soundLoops: soundLoops
+        )
         guard settings.isEnabled else { return }
         showPanel(overridingSuppression: overridingSuppression)
     }

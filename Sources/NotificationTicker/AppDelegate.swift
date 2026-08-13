@@ -16,6 +16,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var activeSoundSelection: String?
     /// 先頭メッセージに割り当てられた音。nil なら共通の通知音を使う。
     private var leadingSoundSelection: String?
+    /// 先頭メッセージによるループの上書き。nil なら音源ごとの設定に従う。
+    private var leadingSoundLoops: Bool?
     private var soundFadeTimer: Timer?
     private var quietHoursTimer: Timer?
     private var isQuietHoursActive = false
@@ -38,9 +40,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.playNotificationSound(looping: true)
         }
         // 先頭メッセージが変わったら、そのフィードに割り当てた音へ切り替える。
-        tickerController.tickerView.onLeadingSoundChange = { [weak self] selection in
+        tickerController.tickerView.onLeadingSoundChange = { [weak self] selection, loops in
             guard let self else { return }
             self.leadingSoundSelection = selection
+            self.leadingSoundLoops = loops
             guard self.settings.soundEnabled, self.tickerController.panel.isVisible else { return }
             self.playNotificationSound(looping: true)
         }
@@ -86,11 +89,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 ? ClaudeCodeStatus.detect(in: notification.tickerText)
                     .flatMap { self.settings.soundSelection(forClaudeStatus: $0) }
                 : nil
+            // 状態の知らせは1回鳴れば足りるので、ループさせない。
             self.tickerController.enqueue(
                 TickerTextLayout.insertingTime(Date(), into: notification.tickerText),
                 badge: TickerTextStyler.notificationBadge,
                 badgeColor: isAITool ? TickerTextStyler.aiBadgeColor : nil,
-                soundSelection: statusSound
+                soundSelection: statusSound,
+                soundLoops: statusSound != nil ? false : nil
             )
         }
         monitor.onStatusChange = { [weak self] status in
@@ -274,8 +279,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             activeSoundSelection = selection
         }
-        // ループするかは音源ごとの設定に従う。
-        let shouldLoop = looping && settings.loopsSound(selection)
+        // ループは、先頭メッセージに上書きがあればそれを、無ければ音源ごとの設定に従う。
+        // 試聴（overriding 指定）のときは上書きを無視する。
+        let itemLoops = overriding == nil ? leadingSoundLoops : nil
+        let shouldLoop = looping && (itemLoops ?? settings.loopsSound(selection))
         if let activeSound {
             activeSound.volume = 1
             if shouldLoop && activeSound.isPlaying && activeSound.loops {
