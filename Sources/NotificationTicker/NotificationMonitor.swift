@@ -18,12 +18,15 @@ struct CapturedNotification: Equatable {
 
 /// Claude Code / Clauminella の通知が表す状態。本文の目印で見分ける。
 enum ClaudeCodeStatus: String, CaseIterable {
+    // 判定は先頭から順に行う。Bash は一般の許可待ちより先に置いて専用の音を優先する。
+    case bashWait
     case approvalWait
     case inputWait
     case done
 
     var label: String {
         switch self {
+        case .bashWait: return "Bash実行待ち"
         case .approvalWait: return "許可待ち"
         case .inputWait: return "入力待ち"
         case .done: return "応答完了"
@@ -32,6 +35,7 @@ enum ClaudeCodeStatus: String, CaseIterable {
 
     private var markers: [String] {
         switch self {
+        case .bashWait: return ["Bash の実行を待っています", "Bashの実行を待っています"]
         case .approvalWait: return ["許可待ち", "実行を待っています", "承認"]
         case .inputWait: return ["入力待ち", "入力を待っています"]
         case .done: return ["応答完了", "完了しました"]

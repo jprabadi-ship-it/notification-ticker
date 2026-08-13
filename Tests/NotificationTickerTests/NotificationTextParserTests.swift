@@ -74,8 +74,13 @@ final class NotificationTextParserTests: XCTestCase {
     }
 
     func testDetectsClaudeCodeStatusFromNotificationText() {
+        // Bash は一般の許可待ちより優先して専用の音を割り当てられる。
         XCTAssertEqual(
             ClaudeCodeStatus.detect(in: "許可待ち: 通知ウィジェット  •  Bash の実行を待っています（17:13）"),
+            .bashWait
+        )
+        XCTAssertEqual(
+            ClaudeCodeStatus.detect(in: "許可待ち: 通知ウィジェット  •  Edit の実行を待っています"),
             .approvalWait
         )
         XCTAssertEqual(
