@@ -66,6 +66,7 @@ final class TickerSettings {
         static let earthquakeAlertsEnabled = "earthquakeAlertsEnabled"
         static let earthquakeMinimumIntensity = "earthquakeMinimumIntensity"
         static let earthquakeSoundSelection = "earthquakeSoundSelection"
+        static let claudeStatusSoundSelections = "claudeStatusSoundSelections"
         static let localAreaEnabled = "localAreaEnabled"
         static let localAreaName = "localAreaName"
         static let eewEnabled = "eewEnabled"
@@ -271,6 +272,17 @@ final class TickerSettings {
         return trimmed.isEmpty ? nil : trimmed
     }
 
+    /// Claude Code の状態（rawValue）→ 効果音の選択文字列。未設定は共通の通知音。
+    var claudeStatusSoundSelections: [String: String] {
+        didSet { save(Key.claudeStatusSoundSelections, claudeStatusSoundSelections) }
+    }
+
+    func soundSelection(forClaudeStatus status: ClaudeCodeStatus) -> String? {
+        guard let selection = claudeStatusSoundSelections[status.rawValue],
+              !selection.isEmpty else { return nil }
+        return selection
+    }
+
     /// 緊急地震速報（揺れる前の予測）を受け取るか。
     var eewEnabled: Bool {
         didSet { save(Key.eewEnabled, eewEnabled) }
@@ -339,6 +351,7 @@ final class TickerSettings {
             Key.earthquakeAlertsEnabled: true,
             Key.earthquakeMinimumIntensity: "4",
             Key.earthquakeSoundSelection: "",
+            Key.claudeStatusSoundSelections: [String: String](),
             Key.localAreaEnabled: false,
             Key.localAreaName: "",
             Key.eewEnabled: false,
@@ -384,6 +397,7 @@ final class TickerSettings {
         earthquakeAlertsEnabled = defaults.bool(forKey: Key.earthquakeAlertsEnabled)
         earthquakeMinimumIntensity = defaults.string(forKey: Key.earthquakeMinimumIntensity) ?? "4"
         earthquakeSoundSelection = defaults.string(forKey: Key.earthquakeSoundSelection) ?? ""
+        claudeStatusSoundSelections = defaults.dictionary(forKey: Key.claudeStatusSoundSelections) as? [String: String] ?? [:]
         localAreaEnabled = defaults.bool(forKey: Key.localAreaEnabled)
         localAreaName = defaults.string(forKey: Key.localAreaName) ?? ""
         eewEnabled = defaults.bool(forKey: Key.eewEnabled)

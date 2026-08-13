@@ -81,10 +81,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 appName: notification.appName,
                 title: notification.title
             )
+            // Claude Code の状態（許可待ち・入力待ち・応答完了）ごとに音を変えられる。
+            let statusSound = isAITool
+                ? ClaudeCodeStatus.detect(in: notification.tickerText)
+                    .flatMap { self.settings.soundSelection(forClaudeStatus: $0) }
+                : nil
             self.tickerController.enqueue(
                 TickerTextLayout.insertingTime(Date(), into: notification.tickerText),
                 badge: TickerTextStyler.notificationBadge,
-                badgeColor: isAITool ? TickerTextStyler.aiBadgeColor : nil
+                badgeColor: isAITool ? TickerTextStyler.aiBadgeColor : nil,
+                soundSelection: statusSound
             )
         }
         monitor.onStatusChange = { [weak self] status in

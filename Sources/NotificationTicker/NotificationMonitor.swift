@@ -16,6 +16,36 @@ struct CapturedNotification: Equatable {
     }
 }
 
+/// Claude Code / Clauminella の通知が表す状態。本文の目印で見分ける。
+enum ClaudeCodeStatus: String, CaseIterable {
+    case approvalWait
+    case inputWait
+    case done
+
+    var label: String {
+        switch self {
+        case .approvalWait: return "許可待ち"
+        case .inputWait: return "入力待ち"
+        case .done: return "応答完了"
+        }
+    }
+
+    private var markers: [String] {
+        switch self {
+        case .approvalWait: return ["許可待ち", "実行を待っています", "承認"]
+        case .inputWait: return ["入力待ち", "入力を待っています"]
+        case .done: return ["応答完了", "完了しました"]
+        }
+    }
+
+    /// AIツール由来の通知本文から状態を読み取る。該当しなければ nil。
+    static func detect(in text: String) -> ClaudeCodeStatus? {
+        allCases.first { status in
+            status.markers.contains { text.contains($0) }
+        }
+    }
+}
+
 enum NotificationTextParser {
     private static let ignoredControlTexts: Set<String> = [
         "Notification Center", "通知センター", "Close", "閉じる",

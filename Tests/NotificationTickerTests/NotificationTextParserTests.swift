@@ -72,4 +72,17 @@ final class NotificationTextParserTests: XCTestCase {
         XCTAssertTrue(TickerEdge.left.isVertical)
         XCTAssertTrue(TickerEdge.right.isVertical)
     }
+
+    func testDetectsClaudeCodeStatusFromNotificationText() {
+        XCTAssertEqual(
+            ClaudeCodeStatus.detect(in: "許可待ち: 通知ウィジェット  •  Bash の実行を待っています（17:13）"),
+            .approvalWait
+        )
+        XCTAssertEqual(
+            ClaudeCodeStatus.detect(in: "入力待ち: claude-luminella  •  入力を待っています"),
+            .inputWait
+        )
+        XCTAssertEqual(ClaudeCodeStatus.detect(in: "応答完了"), .done)
+        XCTAssertNil(ClaudeCodeStatus.detect(in: "ビルドが終わりました"))
+    }
 }

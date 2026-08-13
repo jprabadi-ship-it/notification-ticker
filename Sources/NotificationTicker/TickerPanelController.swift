@@ -47,7 +47,7 @@ enum TickerTextStyler {
     /// Claude Code / Codex など、AIツール由来の通知かどうか。
     static func isAIToolNotification(appName: String?, title: String?) -> Bool {
         let haystack = [appName, title].compactMap { $0 }.joined(separator: " ").lowercased()
-        return ["claude", "codex"].contains { haystack.contains($0) }
+        return ["claude", "codex", "luminella"].contains { haystack.contains($0) }
     }
 
     /// バッジの文字色。黄色の地には黒、それ以外は白。

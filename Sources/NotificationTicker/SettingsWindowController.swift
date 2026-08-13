@@ -24,6 +24,9 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
     private let eewCheckbox = NSButton(checkboxWithTitle: "緊急地震速報（揺れる前の予測）を表示", target: nil, action: nil)
     private let eewIntensityPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let eewStatusLabel = NSTextField(labelWithString: "")
+    private let claudeStatusPopups: [ClaudeCodeStatus: NSPopUpButton] = Dictionary(
+        uniqueKeysWithValues: ClaudeCodeStatus.allCases.map { ($0, NSPopUpButton(frame: .zero, pullsDown: false)) }
+    )
     private let edgePopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let displayPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let soundPopup = NSPopUpButton(frame: .zero, pullsDown: false)
@@ -279,6 +282,20 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         }
         let eewIntensityRow = makePopupRow(label: "予測震度の下限", popup: eewIntensityPopup)
 
+        var claudeRows: [NSView] = []
+        for (index, status) in ClaudeCodeStatus.allCases.enumerated() {
+            guard let popup = claudeStatusPopups[status] else { continue }
+            popup.tag = index
+            popup.target = self
+            popup.action = #selector(claudeStatusSoundChanged(_:))
+            popup.toolTip = "Claude Code / Clauminella の「\(status.label)」の通知が流れたときの音"
+            claudeRows.append(makePopupRow(label: "　\(status.label)", popup: popup))
+        }
+        let claudeHeader = NSTextField(labelWithString: "Claude Code の状態ごとの効果音")
+        claudeHeader.font = .systemFont(ofSize: 12, weight: .semibold)
+        claudeHeader.textColor = .secondaryLabelColor
+        reloadClaudeStatusPopups()
+
         let earthquakeSoundRow = NSStackView(views: [
             {
                 let label = NSTextField(labelWithString: "地震の効果音")
@@ -388,6 +405,8 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
             separator(), quietHoursCheckbox, quietTimeRow, earthquakeRow, earthquakeIntensityRow,
             localAreaCheckbox, localAreaRow, earthquakeSoundRow,
             eewRow, eewIntensityRow,
+            claudeHeader,
+        ] + claudeRows + [
             soundEnabled, soundRow, soundsFolderRow, importSoundButton, bottomRow
         ])
         stack.orientation = .vertical
@@ -764,6 +783,48 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
             : settings.earthquakeSoundSelection
     }
 
+    /// Claude Code の状態ごとのポップアップを、通知音と同じ選択肢で埋める。
+    private func reloadClaudeStatusPopups() {
+        for status in ClaudeCodeStatus.allCases {
+            guard let popup = claudeStatusPopups[status] else { continue }
+            popup.removeAllItems()
+            popup.addItem(withTitle: "共通の通知音")
+            popup.lastItem?.representedObject = ""
+            for name in availableSystemSoundNames() {
+                popup.addItem(withTitle: name)
+                popup.lastItem?.representedObject = "system:\(name)"
+            }
+            let customPaths = settings.customSoundPaths.filter { FileManager.default.fileExists(atPath: $0) }
+            if !customPaths.isEmpty {
+                popup.menu?.addItem(.separator())
+                for path in customPaths {
+                    let name = URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent
+                    popup.addItem(withTitle: "MP3: \(name)")
+                    popup.lastItem?.representedObject = "file:\(path)"
+                }
+            }
+            let selection = settings.claudeStatusSoundSelections[status.rawValue] ?? ""
+            if let selected = popup.itemArray.first(where: { ($0.representedObject as? String) == selection }) {
+                popup.select(selected)
+            } else {
+                popup.selectItem(at: 0)
+            }
+        }
+    }
+
+    /// 選択と同時に試聴する。状態は3つあり、都度ボタンを押すのは煩わしい。
+    @objc private func claudeStatusSoundChanged(_ sender: NSPopUpButton) {
+        guard ClaudeCodeStatus.allCases.indices.contains(sender.tag),
+              let selection = sender.selectedItem?.representedObject as? String else { return }
+        let status = ClaudeCodeStatus.allCases[sender.tag]
+        if selection.isEmpty {
+            settings.claudeStatusSoundSelections.removeValue(forKey: status.rawValue)
+        } else {
+            settings.claudeStatusSoundSelections[status.rawValue] = selection
+        }
+        onPreviewSound?(selection.isEmpty ? settings.soundSelection : selection)
+    }
+
     @objc private func eewEnabledChanged(_ sender: NSButton) {
         settings.eewEnabled = sender.state == .on
         updateEarthquakeUI()
@@ -900,6 +961,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
             if let first = imported.first { settings.soundSelection = "file:\(first)" }
             reloadSoundPopup()
             reloadEarthquakeSoundPopup()
+            reloadClaudeStatusPopups()
             onTestSound?()
         } catch {
             let alert = NSAlert(error: error)
