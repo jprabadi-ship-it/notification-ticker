@@ -6,10 +6,10 @@ build_dir="$project_dir/.build"
 dist_app="$project_dir/dist/NotificationTicker.app"
 install_dir="/Applications/NotificationTicker.app"
 
-# Apple Development 証明書で署名する。アドホック（--sign -）だと TCC が cdhash で
-# アプリを識別するため、リビルドのたびにアクセシビリティ許可が外れる。
-# 証明書署名なら identity で識別され、リビルド後も許可が維持される。
-signing_identity="Apple Development: jprabadi@gmail.com (32MDKWG8PQ)"
+# Developer ID 証明書で署名する。identity 署名なので TCC の許可はリビルド後も
+# 維持され、公証（notarization）を通せば配布物が Gatekeeper を素通りできる。
+# 公証には Hardened Runtime（--options runtime）と secure timestamp が必須。
+signing_identity="Developer ID Application: Miyashita Kazuya (3HCG7Y94FX)"
 
 cd "$project_dir"
 export CLANG_MODULE_CACHE_PATH="$build_dir/clang-module-cache"
@@ -27,7 +27,7 @@ cp "$build_dir/release/NotificationTicker" "$app_dir/Contents/MacOS/Notification
 cp "$project_dir/Resources/Info.plist" "$app_dir/Contents/Info.plist"
 cp "$project_dir/Resources/AppIcon.icns" "$app_dir/Contents/Resources/AppIcon.icns"
 chmod +x "$app_dir/Contents/MacOS/NotificationTicker"
-codesign --force --deep --sign "$signing_identity" "$app_dir"
+codesign --force --deep --options runtime --timestamp --sign "$signing_identity" "$app_dir"
 codesign --verify --strict "$app_dir"
 
 # Google Drive 配下のバンドルは TCC（アクセシビリティ）の許可が安定しないため、

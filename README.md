@@ -65,10 +65,9 @@ macOSの通知センターをアクセシビリティ経由で監視し、通知
 ### 配布版（.dmg）を使う
 
 1. [リリースページ](../../releases) から `NotificationTicker-x.y.z.dmg` をダウンロードする
-2. マウントして `NotificationTicker.app` を `Applications` へドラッグする
-3. 初回は Finder で **右クリック →「開く」** から起動する
+2. マウントして `NotificationTicker.app` を `Applications` へドラッグして起動する
 
-3番目の手順が必要なのは、このアプリが Apple の Developer ID で署名されていないためです。ダブルクリックすると「開発元を確認できません」と表示されて起動できません。右クリックからの起動は初回だけで、以降は通常どおり開けます。
+v0.2.11 から Developer ID で署名し Apple の公証を受けているため、そのままダブルクリックで開けます。
 
 起動後、次の場所でアクセシビリティを許可してください。許可しないと通知を読み取れません。
 
@@ -86,7 +85,7 @@ macOSの通知センターをアクセシビリティ経由で監視し、通知
 
 ソースツリーが iCloud Drive や Google Drive などの同期フォルダ配下にある場合、その場所のバンドルではアクセシビリティ許可が安定しません。必ず `/Applications` 側を使ってください。
 
-アドホック署名のためリビルドごとに cdhash が変わり、既存の許可エントリが無効になります。許可後にアプリが反応しない場合は、アクセシビリティ一覧の `NotificationTicker` を `−` で削除し、`/Applications/NotificationTicker.app` を `+` で再追加してください。
+署名は Developer ID（identity ベース）なので、リビルドしてもアクセシビリティ許可は維持されます。許可後にアプリが反応しない場合は、アクセシビリティ一覧の `NotificationTicker` を `−` で削除し、`/Applications/NotificationTicker.app` を `+` で再追加してください。
 
 ## 配布用の .dmg を作る
 
@@ -94,7 +93,7 @@ macOSの通知センターをアクセシビリティ経由で監視し、通知
 ./scripts/make-dmg.sh
 ```
 
-`dist/NotificationTicker-<バージョン>.dmg` が生成されます。
+`dist/NotificationTicker-<バージョン>.dmg` が生成されます。署名は Developer ID、公証は App Store Connect の APIキー（`~/.appstoreconnect/private_keys/`）を使って自動で行われます。
 
 ## プライバシー
 
