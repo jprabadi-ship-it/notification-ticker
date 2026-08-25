@@ -52,6 +52,7 @@ final class TickerSettings {
         static let enabled = "tickerEnabled"
         static let edge = "tickerEdge"
         static let displayID = "displayID"
+        static let displayName = "displayName"
         static let soundEnabled = "soundEnabled"
         static let soundName = "soundName"
         static let soundSelection = "soundSelection"
@@ -111,6 +112,12 @@ final class TickerSettings {
     /// Zero means the current main display. Otherwise this is a CGDirectDisplayID.
     var displayID: UInt32 {
         didSet { save(Key.displayID, Int(displayID)) }
+    }
+
+    /// 選んだディスプレイの名前。CGDirectDisplayID は再起動や抜き差しで
+    /// 振り直されることがあるため、名前でも探せるように控えておく。
+    var displayName: String {
+        didSet { save(Key.displayName, displayName) }
     }
 
     var soundEnabled: Bool {
@@ -337,6 +344,7 @@ final class TickerSettings {
             Key.enabled: true,
             Key.edge: TickerEdge.bottom.rawValue,
             Key.displayID: 0,
+            Key.displayName: "",
             Key.soundEnabled: false,
             Key.soundName: "Glass",
             Key.soundSelection: "system:Glass",
@@ -383,6 +391,7 @@ final class TickerSettings {
         isEnabled = defaults.bool(forKey: Key.enabled)
         edge = TickerEdge(rawValue: defaults.string(forKey: Key.edge) ?? "") ?? .bottom
         displayID = UInt32(clamping: defaults.integer(forKey: Key.displayID))
+        displayName = defaults.string(forKey: Key.displayName) ?? ""
         soundEnabled = defaults.bool(forKey: Key.soundEnabled)
         soundName = defaults.string(forKey: Key.soundName) ?? "Glass"
         soundSelection = defaults.string(forKey: Key.soundSelection) ?? "system:Glass"

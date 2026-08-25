@@ -860,11 +860,25 @@ final class TickerPanelController {
     }
 
     private func selectedScreen() -> NSScreen? {
-        if settings.displayID != 0,
-           let selected = NSScreen.screens.first(where: { $0.displayID == settings.displayID }) {
-            return selected
+        let screens = NSScreen.screens
+        // id と名前の両方が一致するものが最優先。id は再起動で振り直されることが
+        // あるため、一致しなければ名前だけで探す。名前でも見つからなければ id。
+        if settings.displayID != 0 || !settings.displayName.isEmpty {
+            if let exact = screens.first(where: {
+                $0.displayID == settings.displayID && $0.localizedName == settings.displayName
+            }) {
+                return exact
+            }
+            if !settings.displayName.isEmpty,
+               let byName = screens.first(where: { $0.localizedName == settings.displayName }) {
+                return byName
+            }
+            if settings.displayID != 0,
+               let byID = screens.first(where: { $0.displayID == settings.displayID }) {
+                return byID
+            }
         }
-        return NSScreen.main ?? NSScreen.screens.first
+        return NSScreen.main ?? screens.first
     }
 }
 

@@ -887,6 +887,9 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
     @objc private func displayChanged(_ sender: NSPopUpButton) {
         guard let number = sender.selectedItem?.representedObject as? NSNumber else { return }
         settings.displayID = number.uint32Value
+        // 名前でも探せるように控える。「主ディスプレイに合わせる」選択（id=0）は名前も空にする。
+        settings.displayName = NSScreen.screens
+            .first(where: { $0.displayID == number.uint32Value })?.localizedName ?? ""
     }
 
     @objc private func soundEnabledChanged(_ sender: NSButton) {
