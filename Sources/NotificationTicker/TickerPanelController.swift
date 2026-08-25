@@ -1,5 +1,10 @@
 import AppKit
+import os
 import QuartzCore
+
+/// スリープ復帰や画面構成の変化をまたいだ不具合を追えるように、要所だけ記録する。
+/// 読み出し: log show --predicate 'subsystem == "jp.local.NotificationTicker"' --last 12h
+let tickerLog = Logger(subsystem: "jp.local.NotificationTicker", category: "ticker")
 
 enum TickerTextStyler {
     static let titleColor = NSColor(calibratedRed: 1, green: 0.03, blue: 0.03, alpha: 1)
@@ -790,7 +795,14 @@ final class TickerPanelController {
     }
 
     private func showPanel(overridingSuppression: Bool = false) {
-        guard !isSuppressed || overridingSuppression else { return }
+        guard !isSuppressed || overridingSuppression else {
+            tickerLog.info("showPanel skipped: suppressed")
+            return
+        }
+        // 非表示の間にディスプレイ構成が変わっていると、パネルが消えた画面に
+        // 取り残されたまま orderFront しても映らない。表示直前に必ず置き直す。
+        reposition()
+        tickerLog.info("showPanel: frame=\(String(describing: self.panel.frame), privacy: .public)")
         fadeGeneration += 1
         NSAnimationContext.beginGrouping()
         NSAnimationContext.current.duration = 0

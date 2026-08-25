@@ -369,6 +369,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard force || shouldPause != isQuietHoursActive else { return }
         isQuietHoursActive = shouldPause
 
+        tickerLog.info("quiet hours: \(shouldPause ? "enter" : "exit", privacy: .public)")
         if shouldPause {
             tickerController.setSuppressed(true)
             fadeOutNotificationSound()
