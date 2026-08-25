@@ -796,13 +796,13 @@ final class TickerPanelController {
 
     private func showPanel(overridingSuppression: Bool = false) {
         guard !isSuppressed || overridingSuppression else {
-            tickerLog.info("showPanel skipped: suppressed")
+            tickerLog.notice("showPanel skipped: suppressed")
             return
         }
         // 非表示の間にディスプレイ構成が変わっていると、パネルが消えた画面に
         // 取り残されたまま orderFront しても映らない。表示直前に必ず置き直す。
         reposition()
-        tickerLog.info("showPanel: frame=\(String(describing: self.panel.frame), privacy: .public)")
+        tickerLog.notice("showPanel: frame=\(String(describing: self.panel.frame), privacy: .public)")
         fadeGeneration += 1
         NSAnimationContext.beginGrouping()
         NSAnimationContext.current.duration = 0
