@@ -57,6 +57,7 @@ final class TickerSettings {
         static let soundName = "soundName"
         static let soundSelection = "soundSelection"
         static let soundLoopSelections = "soundLoopSelections"
+        static let soundVolume = "soundVolume"
         static let customSoundPaths = "customSoundPaths"
         static let soundsFolderPath = "soundsFolderPath"
         static let feedsEnabled = "feedsEnabled"
@@ -130,6 +131,11 @@ final class TickerSettings {
 
     var soundSelection: String {
         didSet { save(Key.soundSelection, soundSelection) }
+    }
+
+    /// 効果音の音量（0.0〜1.0）。すべての効果音に共通で掛かる。
+    var soundVolume: Double {
+        didSet { save(Key.soundVolume, soundVolume) }
     }
 
     /// 音源（"system:Glass" や "file:/path"）ごとのループ設定。未登録はループする。
@@ -349,6 +355,7 @@ final class TickerSettings {
             Key.soundName: "Glass",
             Key.soundSelection: "system:Glass",
             Key.soundLoopSelections: [String: Bool](),
+            Key.soundVolume: 0.6,
             Key.customSoundPaths: [],
             Key.soundsFolderPath: "",
             Key.feedsEnabled: false,
@@ -396,6 +403,10 @@ final class TickerSettings {
         soundName = defaults.string(forKey: Key.soundName) ?? "Glass"
         soundSelection = defaults.string(forKey: Key.soundSelection) ?? "system:Glass"
         soundLoopSelections = defaults.dictionary(forKey: Key.soundLoopSelections) as? [String: Bool] ?? [:]
+        // 既存環境（保存値なし＝これまで常に最大音量）では 60% に下げて引き継ぐ。
+        soundVolume = defaults.object(forKey: Key.soundVolume) == nil
+            ? 0.6
+            : defaults.double(forKey: Key.soundVolume)
         customSoundPaths = defaults.stringArray(forKey: Key.customSoundPaths) ?? []
         soundsFolderPath = defaults.string(forKey: Key.soundsFolderPath) ?? ""
         feedsEnabled = defaults.bool(forKey: Key.feedsEnabled)

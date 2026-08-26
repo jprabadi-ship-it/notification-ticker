@@ -285,7 +285,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let itemLoops = overriding == nil ? leadingSoundLoops : nil
         let shouldLoop = looping && (itemLoops ?? settings.loopsSound(selection))
         if let activeSound {
-            activeSound.volume = 1
+            activeSound.volume = Float(settings.soundVolume)
             if shouldLoop && activeSound.isPlaying && activeSound.loops {
                 return
             }
@@ -316,7 +316,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 timer.invalidate()
                 activeSound.stop()
                 activeSound.loops = false
-                activeSound.volume = 1
+                activeSound.volume = Float(self.settings.soundVolume)
                 self.soundFadeTimer = nil
             }
         }
@@ -356,6 +356,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func applySettingsAndRuntimeState() {
         tickerController.applySettings()
+        // 再生中の音にも音量変更を即時反映する（フェード中は触らない）。
+        if soundFadeTimer == nil {
+            activeSound?.volume = Float(settings.soundVolume)
+        }
         if !settings.soundEnabled {
             fadeOutNotificationSound()
         }

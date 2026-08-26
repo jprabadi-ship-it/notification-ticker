@@ -31,6 +31,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
     private let displayPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let soundPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let soundLoopCheckbox = NSButton(checkboxWithTitle: "", target: nil, action: nil)
+    private let volumeValue = NSTextField(labelWithString: "")
     private let fontPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let launchAtLoginCheckbox = NSButton(checkboxWithTitle: "ログイン時に開く", target: nil, action: nil)
     private let soundsFolderLabel = NSTextField(labelWithString: "")
@@ -334,6 +335,16 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         soundLoopCheckbox.action = #selector(soundLoopChanged(_:))
         updateSoundLoopCheckbox()
 
+        let volume = makeSlider(
+            label: "効果音の音量",
+            min: 0.05,
+            max: 1.0,
+            value: settings.soundVolume,
+            action: #selector(volumeChanged(_:)),
+            valueLabel: volumeValue
+        )
+        updateVolumeLabel()
+
         let soundTestButton = NSButton(title: "音を試す", target: self, action: #selector(testSound))
         soundTestButton.bezelStyle = .rounded
         let soundLabel = NSTextField(labelWithString: "通知音")
@@ -407,7 +418,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
             eewRow, eewIntensityRow,
             claudeHeader,
         ] + claudeRows + [
-            soundEnabled, soundRow, soundsFolderRow, importSoundButton, bottomRow
+            soundEnabled, volume, soundRow, soundsFolderRow, importSoundButton, bottomRow
         ])
         stack.orientation = .vertical
         stack.alignment = .leading
@@ -452,6 +463,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
             edgeRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
             displayRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
             soundRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            volume.widthAnchor.constraint(equalTo: stack.widthAnchor),
             soundsFolderRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
             header.widthAnchor.constraint(equalTo: stack.widthAnchor),
             soundTestButton.trailingAnchor.constraint(equalTo: soundRow.trailingAnchor),
@@ -543,6 +555,15 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
     /// ループ設定は音源ごとなので、選択中の音に合わせて表示を更新する。
     private func updateSoundLoopCheckbox() {
         soundLoopCheckbox.state = settings.loopsSound(settings.soundSelection) ? .on : .off
+    }
+
+    private func updateVolumeLabel() {
+        volumeValue.stringValue = "\(Int((settings.soundVolume * 100).rounded()))%"
+    }
+
+    @objc private func volumeChanged(_ sender: NSSlider) {
+        settings.soundVolume = sender.doubleValue
+        updateVolumeLabel()
     }
 
     @objc private func soundLoopChanged(_ sender: NSButton) {
