@@ -32,6 +32,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
     private let soundPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let soundLoopCheckbox = NSButton(checkboxWithTitle: "", target: nil, action: nil)
     private let volumeValue = NSTextField(labelWithString: "")
+    private let summarizerStatusLabel = NSTextField(labelWithString: "")
     private let fontPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let launchAtLoginCheckbox = NSButton(checkboxWithTitle: "ログイン時に開く", target: nil, action: nil)
     private let soundsFolderLabel = NSTextField(labelWithString: "")
@@ -87,7 +88,14 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
     override func showWindow(_ sender: Any?) {
         // 他の場所（システム設定）で変更されている場合があるので開くたびに読み直す。
         updateLaunchAtLoginCheckbox()
+        updateSummarizerStatus()
         super.showWindow(sender)
+    }
+
+    /// 長文要約（Apple Intelligence）の利用可否。開くたびに現況を映す。
+    private func updateSummarizerStatus() {
+        summarizerStatusLabel.stringValue =
+            "長文通知の要約（実験的）: " + NotificationSummarizer.availabilityDescription
     }
 
     func updateStatus(_ status: NotificationMonitor.Status) {
@@ -345,6 +353,10 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         )
         updateVolumeLabel()
 
+        summarizerStatusLabel.font = .systemFont(ofSize: 11)
+        summarizerStatusLabel.textColor = .secondaryLabelColor
+        updateSummarizerStatus()
+
         let soundTestButton = NSButton(title: "音を試す", target: self, action: #selector(testSound))
         soundTestButton.bezelStyle = .rounded
         let soundLabel = NSTextField(labelWithString: "通知音")
@@ -418,7 +430,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
             eewRow, eewIntensityRow,
             claudeHeader,
         ] + claudeRows + [
-            soundEnabled, volume, soundRow, soundsFolderRow, importSoundButton, bottomRow
+            soundEnabled, volume, soundRow, soundsFolderRow, importSoundButton, summarizerStatusLabel, bottomRow
         ])
         stack.orientation = .vertical
         stack.alignment = .leading

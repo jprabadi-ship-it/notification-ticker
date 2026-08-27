@@ -93,13 +93,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 title: notification.title
             )
             // 状態の知らせは1回鳴れば足りるので、ループさせない。
-            self.tickerController.enqueue(
-                TickerTextLayout.insertingTime(Date(), into: displayText),
-                badge: TickerTextStyler.notificationBadge,
-                badgeColor: isAITool ? TickerTextStyler.aiBadgeColor : nil,
-                soundSelection: statusSound,
-                soundLoops: statusSound != nil ? false : nil
-            )
+            let enqueue: (String) -> Void = { [weak self] text in
+                self?.tickerController.enqueue(
+                    TickerTextLayout.insertingTime(Date(), into: text),
+                    badge: TickerTextStyler.notificationBadge,
+                    badgeColor: isAITool ? TickerTextStyler.aiBadgeColor : nil,
+                    soundSelection: statusSound,
+                    soundLoops: statusSound != nil ? false : nil
+                )
+            }
+            // 長文は Apple Intelligence で要約を試みる（実験的・端末内処理）。
+            // 使えない・失敗・時間切れなら従来どおり切り詰める。
+            let fullText = notification.tickerText
+            if fullText.count > 200, NotificationSummarizer.isUsable {
+                Task { @MainActor in
+                    if let summary = await NotificationSummarizer.summarize(fullText) {
+                        enqueue("〔要約〕" + summary)
+                    } else {
+                        enqueue(TickerTextLayout.condensed(fullText))
+                    }
+                }
+            } else {
+                enqueue(displayText)
+            }
         }
         monitor.onStatusChange = { [weak self] status in
             guard let self else { return }
