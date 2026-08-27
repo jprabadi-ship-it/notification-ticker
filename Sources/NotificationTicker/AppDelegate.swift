@@ -79,7 +79,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         monitor.onNotification = { [weak self] notification in
             guard let self, !self.isQuietHoursActive else { return }
+            // 状態判定と重複判定は全文で行い、表示だけを切り詰める。
             guard self.deduplicator.shouldEmit(notification.tickerText) else { return }
+            let displayText = TickerTextLayout.condensed(notification.tickerText)
             // Claude Code の状態（Bash実行待ち・許可待ち・入力待ち・応答完了）ごとに音を変えられる。
             // 通知の読み取りでアプリ名やタイトルが欠けることがあるため、AIツール判定には
             // 頼らず、本文の目印だけで状態を見分ける。目印は Clauminella 固有の文言なので
@@ -92,7 +94,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             )
             // 状態の知らせは1回鳴れば足りるので、ループさせない。
             self.tickerController.enqueue(
-                TickerTextLayout.insertingTime(Date(), into: notification.tickerText),
+                TickerTextLayout.insertingTime(Date(), into: displayText),
                 badge: TickerTextStyler.notificationBadge,
                 badgeColor: isAITool ? TickerTextStyler.aiBadgeColor : nil,
                 soundSelection: statusSound,

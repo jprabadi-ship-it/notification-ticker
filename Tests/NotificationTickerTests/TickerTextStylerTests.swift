@@ -201,4 +201,12 @@ final class TickerTextStylerTests: XCTestCase {
         let color = attributed.attribute(.foregroundColor, at: index, effectiveRange: nil) as? NSColor
         XCTAssertTrue(color?.isEqual(expected) == true, file: file, line: line)
     }
+
+    func testCondensesOnlyOverlongText() {
+        let short = String(repeating: "あ", count: 200)
+        let long = String(repeating: "い", count: 201)
+
+        XCTAssertEqual(TickerTextLayout.condensed(short), short)
+        XCTAssertEqual(TickerTextLayout.condensed(long), String(repeating: "い", count: 50) + "…")
+    }
 }

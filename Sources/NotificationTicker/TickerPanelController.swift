@@ -185,6 +185,17 @@ enum TickerTextLayout {
         return result.joined(separator: "\n")
     }
 
+    /// 長すぎる通知は読み切れないまま流れていくだけなので、思い切って切り詰める。
+    /// しきい値を超えたものだけが対象。少し長い程度の通知はそのまま全文を流す。
+    static func condensed(
+        _ text: String,
+        threshold: Int = 200,
+        limit: Int = 50
+    ) -> String {
+        guard text.count > threshold else { return text }
+        return String(text.prefix(limit)) + "…"
+    }
+
     /// 先頭にバッジを付け、タイトル・発行時刻・内容を1行にまとめる。
     static func titleAndContentLines(
         in text: String,
