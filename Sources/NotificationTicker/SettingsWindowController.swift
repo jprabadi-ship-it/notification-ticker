@@ -33,6 +33,12 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
     private let soundLoopCheckbox = NSButton(checkboxWithTitle: "", target: nil, action: nil)
     private let volumeValue = NSTextField(labelWithString: "")
     private let summarizerStatusLabel = NSTextField(labelWithString: "")
+    private let localSummarizerCheckbox = NSButton(
+        checkboxWithTitle: "Apple Intelligence が使えないときはローカル LLM（Ollama）で要約",
+        target: nil,
+        action: nil
+    )
+    private let localSummarizerField = NSTextField()
     private let fontPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let launchAtLoginCheckbox = NSButton(checkboxWithTitle: "ログイン時に開く", target: nil, action: nil)
     private let soundsFolderLabel = NSTextField(labelWithString: "")
@@ -92,10 +98,28 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         super.showWindow(sender)
     }
 
-    /// 長文要約（Apple Intelligence）の利用可否。開くたびに現況を映す。
+    /// 長文要約の利用可否。開くたびに現況を映す。
     private func updateSummarizerStatus() {
-        summarizerStatusLabel.stringValue =
-            "長文通知の要約（実験的）: " + NotificationSummarizer.availabilityDescription
+        let detail: String
+        if NotificationSummarizer.isUsable {
+            detail = "Apple Intelligence を使用します"
+        } else if let model = settings.effectiveLocalSummarizerModel {
+            detail = "\(NotificationSummarizer.availabilityDescription) → ローカル LLM（\(model)）を使用します"
+        } else {
+            detail = "\(NotificationSummarizer.availabilityDescription)。要約せず50文字で切り詰めます"
+        }
+        summarizerStatusLabel.stringValue = "長文通知の要約（実験的）: " + detail
+    }
+
+    @objc private func localSummarizerEnabledChanged(_ sender: NSButton) {
+        settings.localSummarizerEnabled = sender.state == .on
+        localSummarizerField.isEnabled = sender.state == .on
+        updateSummarizerStatus()
+    }
+
+    @objc private func localSummarizerModelChanged(_ sender: NSTextField) {
+        settings.localSummarizerModel = sender.stringValue
+        updateSummarizerStatus()
     }
 
     func updateStatus(_ status: NotificationMonitor.Status) {
@@ -353,6 +377,19 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         )
         updateVolumeLabel()
 
+        localSummarizerCheckbox.target = self
+        localSummarizerCheckbox.action = #selector(localSummarizerEnabledChanged(_:))
+        localSummarizerCheckbox.state = settings.localSummarizerEnabled ? .on : .off
+
+        localSummarizerField.stringValue = settings.localSummarizerModel
+        localSummarizerField.placeholderString = "例: gemma3:4b"
+        localSummarizerField.target = self
+        localSummarizerField.action = #selector(localSummarizerModelChanged(_:))
+        localSummarizerField.delegate = self
+        localSummarizerField.isEnabled = settings.localSummarizerEnabled
+        localSummarizerField.toolTip = "Ollama を起動しておく必要があります。要約は端末内で完結し、外部へは送信しません。"
+        let localSummarizerRow = makePopupRowLike(label: "使用モデル", field: localSummarizerField)
+
         summarizerStatusLabel.font = .systemFont(ofSize: 11)
         summarizerStatusLabel.textColor = .secondaryLabelColor
         updateSummarizerStatus()
@@ -430,7 +467,8 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
             eewRow, eewIntensityRow,
             claudeHeader,
         ] + claudeRows + [
-            soundEnabled, volume, soundRow, soundsFolderRow, importSoundButton, summarizerStatusLabel, bottomRow
+            soundEnabled, volume, soundRow, soundsFolderRow, importSoundButton,
+            summarizerStatusLabel, localSummarizerCheckbox, localSummarizerRow, bottomRow
         ])
         stack.orientation = .vertical
         stack.alignment = .leading
@@ -470,6 +508,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
             earthquakeIntensityRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
             earthquakeSoundRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
             localAreaRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            localSummarizerRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
             eewRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
             eewIntensityRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
             edgeRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
@@ -890,6 +929,11 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
     }
 
     func controlTextDidEndEditing(_ obj: Notification) {
+        if (obj.object as? NSTextField) === localSummarizerField {
+            settings.localSummarizerModel = localSummarizerField.stringValue
+            updateSummarizerStatus()
+            return
+        }
         guard (obj.object as? NSTextField) === localAreaField else { return }
         settings.localAreaName = localAreaField.stringValue
             .trimmingCharacters(in: .whitespacesAndNewlines)

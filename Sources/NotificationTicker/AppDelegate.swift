@@ -105,9 +105,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // 長文は Apple Intelligence で要約を試みる（実験的・端末内処理）。
             // 使えない・失敗・時間切れなら従来どおり切り詰める。
             let fullText = notification.tickerText
-            if fullText.count > 200, NotificationSummarizer.isUsable {
+            let backend = NotificationSummarizer.backend(
+                localModel: self.settings.effectiveLocalSummarizerModel
+            )
+            if fullText.count > 200, let backend {
                 Task { @MainActor in
-                    if let summary = await NotificationSummarizer.summarize(fullText) {
+                    if let summary = await NotificationSummarizer.summarize(fullText, using: backend) {
                         enqueue("〔要約〕" + summary)
                     } else {
                         enqueue(TickerTextLayout.condensed(fullText))
