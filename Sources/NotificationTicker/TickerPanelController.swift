@@ -676,6 +676,7 @@ final class TickerPanelController {
     var onTickerDidShow: (() -> Void)?
     private let settings: TickerSettings
     private var screenObserver: NSObjectProtocol?
+    private var spaceObserver: NSObjectProtocol?
     private var globalMouseMonitor: Any?
     private var globalScrollMonitor: Any?
     private var fadeGeneration = 0
@@ -699,7 +700,7 @@ final class TickerPanelController {
         panel.level = .statusBar
         panel.hidesOnDeactivate = false
         panel.isMovable = false
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
+        applyAllSpacesBehavior()
 
         tickerView.onActivityChange = { [weak self] isActive in
             guard let self else { return }
@@ -745,12 +746,28 @@ final class TickerPanelController {
             queue: .main
         ) { [weak self] _ in self?.reposition() }
 
+        // デスクトップ（操作スペース）を切り替えたとき、表示中のパネルが元の
+        // スペースに取り残されることがある。切替のたびに全スペース表示を宣言し直し、
+        // 出したままにする。
+        spaceObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.activeSpaceDidChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self, self.panel.isVisible else { return }
+            self.applyAllSpacesBehavior()
+            self.reposition()
+            self.panel.orderFrontRegardless()
+            tickerLog.notice("space changed: re-shown")
+        }
+
         applySettings()
         reposition()
     }
 
     deinit {
         if let screenObserver { NotificationCenter.default.removeObserver(screenObserver) }
+        if let spaceObserver { NSWorkspace.shared.notificationCenter.removeObserver(spaceObserver) }
         if let globalMouseMonitor { NSEvent.removeMonitor(globalMouseMonitor) }
         if let globalScrollMonitor { NSEvent.removeMonitor(globalScrollMonitor) }
     }
@@ -805,6 +822,12 @@ final class TickerPanelController {
         tickerView.clear()
     }
 
+    /// すべての操作スペースとフルスクリーンの上に出す宣言。macOS 側で
+    /// 割り当てが外れることがあるため、表示のたびに宣言し直す。
+    private func applyAllSpacesBehavior() {
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
+    }
+
     private func showPanel(overridingSuppression: Bool = false) {
         guard !isSuppressed || overridingSuppression else {
             tickerLog.notice("showPanel skipped: suppressed")
@@ -813,6 +836,8 @@ final class TickerPanelController {
         // 非表示の間にディスプレイ構成が変わっていると、パネルが消えた画面に
         // 取り残されたまま orderFront しても映らない。表示直前に必ず置き直す。
         reposition()
+        // 非表示の間にスペースを移動していると割り当てが外れていることがある。
+        applyAllSpacesBehavior()
         tickerLog.notice("showPanel: frame=\(String(describing: self.panel.frame), privacy: .public)")
         fadeGeneration += 1
         NSAnimationContext.beginGrouping()
