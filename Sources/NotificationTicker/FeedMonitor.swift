@@ -4,6 +4,8 @@ struct FeedItem: Equatable {
     let title: String
     let identifier: String
     var publishedAt: Date?
+    /// 記事ページの URL（文字列のまま保持。開くときに検証する）。
+    var link: String = ""
 }
 
 enum FeedDateParser {
@@ -113,7 +115,9 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
             let title = itemTitle.trimmingCharacters(in: .whitespacesAndNewlines)
             if !title.isEmpty {
                 let identifier = !itemIdentifier.isEmpty ? itemIdentifier : (!itemLink.isEmpty ? itemLink : title)
-                items.append(FeedItem(title: title, identifier: identifier, publishedAt: itemPublishedAt))
+                items.append(FeedItem(
+                    title: title, identifier: identifier, publishedAt: itemPublishedAt, link: itemLink
+                ))
             }
             insideItem = false
         }
@@ -128,8 +132,8 @@ final class FeedXMLParser: NSObject, XMLParserDelegate {
 }
 
 final class FeedMonitor {
-    /// 見出しと、その取得元のフィードURL。
-    var onHeadline: ((String, String) -> Void)?
+    /// 見出しと、その取得元のフィードURL、記事ページのリンク（無ければ nil）。
+    var onHeadline: ((String, String, URL?) -> Void)?
     var onStatusChange: ((String) -> Void)?
 
     private let settings: TickerSettings
@@ -275,7 +279,11 @@ final class FeedMonitor {
             for item in feed.items.prefix(5).reversed() {
                 seenIdentifiers.insert(item.identifier)
                 if skipsEarthquakeNews, Self.isEarthquakeHeadline(item.title) { continue }
-                publishHeadline(Self.headline(feedTitle: feed.title, item: item), urlString: urlString)
+                publishHeadline(
+                    Self.headline(feedTitle: feed.title, item: item),
+                    urlString: urlString,
+                    link: Self.articleURL(for: item)
+                )
             }
         } else if !primedURLs.contains(urlString) {
             feed.items.forEach { seenIdentifiers.insert($0.identifier) }
@@ -286,7 +294,11 @@ final class FeedMonitor {
                 seenIdentifiers.insert(item.identifier)
                 if isStale(item) { continue }
                 if skipsEarthquakeNews, Self.isEarthquakeHeadline(item.title) { continue }
-                publishHeadline(Self.headline(feedTitle: feed.title, item: item), urlString: urlString)
+                publishHeadline(
+                    Self.headline(feedTitle: feed.title, item: item),
+                    urlString: urlString,
+                    link: Self.articleURL(for: item)
+                )
             }
         }
         if seenIdentifiers.count > seenLimit {
@@ -311,8 +323,19 @@ final class FeedMonitor {
         return parts.joined(separator: "  •  ")
     }
 
-    private func publishHeadline(_ headline: String, urlString: String) {
-        DispatchQueue.main.async { [weak self] in self?.onHeadline?(headline, urlString) }
+    /// 記事ページの URL。http/https 以外は開かない。フィード側の細工で
+    /// file: や独自スキームを踏まされないようにするため。
+    static func articleURL(for item: FeedItem) -> URL? {
+        let trimmed = item.link.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URL(string: trimmed),
+              let scheme = url.scheme?.lowercased(),
+              scheme == "http" || scheme == "https"
+        else { return nil }
+        return url
+    }
+
+    private func publishHeadline(_ headline: String, urlString: String, link: URL?) {
+        DispatchQueue.main.async { [weak self] in self?.onHeadline?(headline, urlString, link) }
     }
 
     private func publishStatus(_ status: String) {

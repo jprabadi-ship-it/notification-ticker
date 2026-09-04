@@ -210,4 +210,15 @@ final class TickerTextStylerTests: XCTestCase {
         XCTAssertEqual(TickerTextLayout.condensed(short), short)
         XCTAssertEqual(TickerTextLayout.condensed(long), String(repeating: "い", count: 50) + "…")
     }
+
+    func testMapsClickPointToScrollPositionForEachEdge() {
+        // 横型はそのまま x。
+        let horizontal = NSRect(x: 0, y: 0, width: 1000, height: 80)
+        XCTAssertEqual(TickerView.scrollPosition(of: NSPoint(x: 120, y: 30), in: horizontal, edge: .top), 120)
+        XCTAssertEqual(TickerView.scrollPosition(of: NSPoint(x: 120, y: 30), in: horizontal, edge: .bottom), 120)
+        // 縦型は描画時に回転しているため、左辺は y がそのまま、右辺は上下が反転する。
+        let vertical = NSRect(x: 0, y: 0, width: 80, height: 600)
+        XCTAssertEqual(TickerView.scrollPosition(of: NSPoint(x: 40, y: 150), in: vertical, edge: .left), 150)
+        XCTAssertEqual(TickerView.scrollPosition(of: NSPoint(x: 40, y: 150), in: vertical, edge: .right), 450)
+    }
 }

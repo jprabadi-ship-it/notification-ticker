@@ -126,13 +126,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.statusMenuItem.title = effectiveStatus.label
             self.settingsController.updateStatus(effectiveStatus)
         }
-        feedMonitor.onHeadline = { [weak self] headline, urlString in
+        feedMonitor.onHeadline = { [weak self] headline, urlString, link in
             guard let self else { return }
             guard !self.isQuietHoursActive else { return }
             guard self.deduplicator.shouldEmit(headline) else { return }
             self.tickerController.enqueue(
                 headline,
-                soundSelection: self.settings.soundSelection(forFeedURL: urlString)
+                soundSelection: self.settings.soundSelection(forFeedURL: urlString),
+                link: link
             )
         }
         feedMonitor.onStatusChange = { [weak self] status in

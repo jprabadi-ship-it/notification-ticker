@@ -13,9 +13,21 @@ final class FeedXMLParserTests: XCTestCase {
         let feed = FeedXMLParser.parse(data: Data(xml.utf8))
         XCTAssertEqual(feed?.title, "NHKニュース")
         XCTAssertEqual(feed?.items, [
-            FeedItem(title: "最初のニュース", identifier: "news-1"),
-            FeedItem(title: "次のニュース", identifier: "https://example.com/2")
+            FeedItem(title: "最初のニュース", identifier: "news-1", link: "https://example.com/1"),
+            FeedItem(title: "次のニュース", identifier: "https://example.com/2", link: "https://example.com/2")
         ])
+    }
+
+    func testArticleURLAcceptsOnlyWebSchemes() {
+        func url(_ link: String) -> String? {
+            FeedMonitor.articleURL(for: FeedItem(title: "a", identifier: "1", link: link))?.absoluteString
+        }
+        XCTAssertEqual(url("https://example.com/x"), "https://example.com/x")
+        XCTAssertEqual(url("  http://example.com/y \n"), "http://example.com/y")
+        // フィード側の細工で任意のスキームを踏まされないようにする。
+        XCTAssertNil(url("file:///etc/passwd"))
+        XCTAssertNil(url("javascript:alert(1)"))
+        XCTAssertNil(url(""))
     }
 
     func testParsesAtomFeed() {
@@ -26,7 +38,9 @@ final class FeedXMLParserTests: XCTestCase {
         """
         let feed = FeedXMLParser.parse(data: Data(xml.utf8))
         XCTAssertEqual(feed?.title, "Example Atom")
-        XCTAssertEqual(feed?.items, [FeedItem(title: "Atom headline", identifier: "tag:example,1")])
+        XCTAssertEqual(feed?.items, [
+            FeedItem(title: "Atom headline", identifier: "tag:example,1", link: "https://example.com/a")
+        ])
     }
 
     func testParsesCDATATitles() {

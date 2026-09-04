@@ -254,6 +254,8 @@ final class TickerView: NSView {
         let soundSelection: String?
         /// ループの上書き。nil なら音源ごとの設定に従う。
         let soundLoops: Bool?
+        /// クリックで開くページ。フィードの記事など。
+        let link: URL?
         var x: CGFloat
         var width: CGFloat
         var lineCount: Int
@@ -271,7 +273,8 @@ final class TickerView: NSView {
     /// 先頭メッセージが入れ替わり、鳴らすべき音が変わったときに呼ばれる。
     var onLeadingSoundChange: ((String?, Bool?) -> Void)?
     private var lastReportedSoundSelection: String??
-    var onDoubleClick: (() -> Void)?
+    /// クリック（ビュー座標の位置と回数）。振り分けは呼び出し側が行う。
+    var onClick: ((NSPoint, Int) -> Void)?
     var onContentMetricsChange: (() -> Void)?
 
     var hasContent: Bool { !items.isEmpty }
@@ -303,11 +306,24 @@ final class TickerView: NSView {
     override var isOpaque: Bool { false }
 
     override func mouseDown(with event: NSEvent) {
-        if event.clickCount >= 2 {
-            onDoubleClick?()
-        } else {
-            super.mouseDown(with: event)
+        onClick?(convert(event.locationInWindow, from: nil), event.clickCount)
+        super.mouseDown(with: event)
+    }
+
+    /// クリック位置を、メッセージが流れる方向の座標に直す。
+    /// 縦型は描画時に回転しているため、左辺は y がそのまま、右辺は上下が反転する。
+    static func scrollPosition(of point: NSPoint, in bounds: NSRect, edge: TickerEdge) -> CGFloat {
+        switch edge {
+        case .left: return point.y
+        case .right: return bounds.height - point.y
+        default: return point.x
         }
+    }
+
+    /// その位置に流れているメッセージのリンク。無ければ nil。
+    func link(at point: NSPoint) -> URL? {
+        let position = Self.scrollPosition(of: point, in: bounds, edge: settings.edge)
+        return items.first { $0.x <= position && position <= $0.x + $0.width }?.link
     }
 
     var leadingSoundSelection: String? { items.first?.soundSelection }
@@ -317,7 +333,8 @@ final class TickerView: NSView {
         badge: String = TickerTextStyler.badge,
         badgeColor: NSColor? = nil,
         soundSelection: String? = nil,
-        soundLoops: Bool? = nil
+        soundLoops: Bool? = nil,
+        link: URL? = nil
     ) {
         let cleaned = TickerTextLayout.titleAndContentLines(
             in: message.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -334,6 +351,7 @@ final class TickerView: NSView {
                 badgeColor: badgeColor ?? TickerTextStyler.backgroundColor(forBadge: badge),
                 soundSelection: soundSelection,
                 soundLoops: soundLoops,
+                link: link,
                 x: startX,
                 width: measuredSize(of: cleaned).width,
                 lineCount: min(
@@ -683,6 +701,8 @@ final class TickerPanelController {
     private let settings: TickerSettings
     private var screenObserver: NSObjectProtocol?
     private var spaceObserver: NSObjectProtocol?
+    /// シングルクリックで開く予定のリンク。ダブルクリックに化けたら取り消す。
+    private var pendingLinkOpen: DispatchWorkItem?
     private var globalMouseMonitor: Any?
     private var globalScrollMonitor: Any?
     private var fadeGeneration = 0
@@ -716,16 +736,22 @@ final class TickerPanelController {
                 self.fadeOutPanel()
             }
         }
-        tickerView.onDoubleClick = { [weak self] in self?.dismiss() }
+        tickerView.onClick = { [weak self] point, count in
+            self?.handleClick(viewPoint: point, clickCount: count)
+        }
         tickerView.onContentMetricsChange = { [weak self] in self?.reposition() }
 
+        // クリック透過中はパネルにクリックが届かないので、他アプリへ渡った
+        // イベントをグローバル監視で拾う（透過でないときは mouseDown 側が受ける）。
         globalMouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: .leftMouseDown) { [weak self] event in
-            guard event.clickCount >= 2 else { return }
+            let clickCount = event.clickCount
             DispatchQueue.main.async {
                 guard let self,
                       self.panel.isVisible,
                       self.panel.frame.contains(NSEvent.mouseLocation) else { return }
-                self.dismiss()
+                let windowPoint = self.panel.convertPoint(fromScreen: NSEvent.mouseLocation)
+                let viewPoint = self.tickerView.convert(windowPoint, from: nil)
+                self.handleClick(viewPoint: viewPoint, clickCount: clickCount)
             }
         }
 
@@ -785,7 +811,8 @@ final class TickerPanelController {
         badgeColor: NSColor? = nil,
         soundSelection: String? = nil,
         soundLoops: Bool? = nil,
-        overridingSuppression: Bool = false
+        overridingSuppression: Bool = false,
+        link: URL? = nil
     ) {
         guard !isSuppressed || overridingSuppression else { return }
         tickerView.enqueue(
@@ -793,7 +820,8 @@ final class TickerPanelController {
             badge: badge,
             badgeColor: badgeColor,
             soundSelection: soundSelection,
-            soundLoops: soundLoops
+            soundLoops: soundLoops,
+            link: link
         )
         guard settings.isEnabled else { return }
         showPanel(overridingSuppression: overridingSuppression)
@@ -826,6 +854,27 @@ final class TickerPanelController {
     func dismiss() {
         guard tickerView.hasContent || panel.isVisible else { return }
         tickerView.clear()
+    }
+
+    /// クリックの振り分け。ダブルクリックは閉じる。シングルクリックは、その位置に
+    /// 流れているメッセージにリンクがあれば開く。ダブルクリックの1回目で開いて
+    /// しまわないよう、システムのダブルクリック間隔だけ待ってから確定する。
+    /// どのメッセージを押したかは、待つ前のクリック時点で決める（流れ続けるため）。
+    private func handleClick(viewPoint: NSPoint, clickCount: Int) {
+        pendingLinkOpen?.cancel()
+        pendingLinkOpen = nil
+        if clickCount >= 2 {
+            dismiss()
+            return
+        }
+        guard let link = tickerView.link(at: viewPoint) else { return }
+        let work = DispatchWorkItem { [weak self] in
+            self?.pendingLinkOpen = nil
+            NSWorkspace.shared.open(link)
+            tickerLog.notice("opened link: \(link.absoluteString, privacy: .public)")
+        }
+        pendingLinkOpen = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + NSEvent.doubleClickInterval, execute: work)
     }
 
     /// すべての操作スペースとフルスクリーンの上に出す宣言。macOS 側で
