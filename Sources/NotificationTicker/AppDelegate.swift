@@ -12,6 +12,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var statusMenuItem: NSMenuItem!
     private var toggleMenuItem: NSMenuItem!
+    /// 流したメッセージの記録（メモリ上のみ）。
+    private let history = DisplayHistory()
+    private lazy var historyController = HistoryWindowController(history: history)
     private var activeSound: NSSound?
     private var activeSoundSelection: String?
     /// 先頭メッセージに割り当てられた音。nil なら共通の通知音を使う。
@@ -126,6 +129,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.statusMenuItem.title = effectiveStatus.label
             self.settingsController.updateStatus(effectiveStatus)
         }
+        tickerController.onEnqueue = { [weak self] text, badge, link in
+            self?.history.record(text: text, badge: badge, link: link)
+        }
+
         feedMonitor.onHeadline = { [weak self] headline, urlString, link in
             guard let self else { return }
             guard !self.isQuietHoursActive else { return }
@@ -254,6 +261,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         test.target = self
         menu.addItem(test)
 
+        let historyItem = NSMenuItem(title: "表示履歴…", action: #selector(showHistory), keyEquivalent: "h")
+        historyItem.target = self
+        menu.addItem(historyItem)
+
         let settingsItem = NSMenuItem(title: "設定…", action: #selector(showSettings), keyEquivalent: ",")
         settingsItem.target = self
         menu.addItem(settingsItem)
@@ -282,6 +293,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func showSettings() {
         settingsController.showWindow(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    @objc private func showHistory() {
+        historyController.showWindow(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
 

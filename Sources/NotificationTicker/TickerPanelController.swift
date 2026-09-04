@@ -703,6 +703,8 @@ final class TickerPanelController {
     private var spaceObserver: NSObjectProtocol?
     /// シングルクリックで開く予定のリンク。ダブルクリックに化けたら取り消す。
     private var pendingLinkOpen: DispatchWorkItem?
+    /// 実際に流すことが決まったメッセージ（本文・バッジ・リンク）。履歴の記録用。
+    var onEnqueue: ((String, String, URL?) -> Void)?
     private var globalMouseMonitor: Any?
     private var globalScrollMonitor: Any?
     private var fadeGeneration = 0
@@ -815,6 +817,7 @@ final class TickerPanelController {
         link: URL? = nil
     ) {
         guard !isSuppressed || overridingSuppression else { return }
+        onEnqueue?(text, badge, link)
         tickerView.enqueue(
             text,
             badge: badge,
