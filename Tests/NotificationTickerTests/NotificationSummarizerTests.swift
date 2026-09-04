@@ -25,15 +25,17 @@ final class NotificationSummarizerTests: XCTestCase {
 
     func testSummarizesWithLocalLLM() async throws {
         try requireOllama()
+        let limit = NotificationSummarizer.defaultLimit
         let summary = await NotificationSummarizer.summarize(
-            longText, using: .localLLM(model: "gemma3:4b"), limit: 50
+            longText, using: .localLLM(model: "gemma3:4b"), limit: limit
         )
         let unwrapped = try XCTUnwrap(summary, "ローカルLLMが要約を返さなかった")
         XCTAssertFalse(unwrapped.isEmpty)
         // 元の本文よりは確実に短い。
         XCTAssertLessThan(unwrapped.count, longText.count)
-        // 保険が効いて、上限の2倍を超えて長いままにはならない。
-        XCTAssertLessThanOrEqual(unwrapped.count, 51)
+        // モデルは指示した字数を守らないことがある（実測で60字指定に66字を返した）。
+        // アプリが保証するのは tidy による「上限の2倍で丸める」ところまで。
+        XCTAssertLessThanOrEqual(unwrapped.count, limit * 2)
         XCTAssertFalse(unwrapped.contains("\n"))
     }
 

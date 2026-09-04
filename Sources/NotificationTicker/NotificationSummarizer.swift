@@ -61,11 +61,31 @@ enum NotificationSummarizer {
         return nil
     }
 
+    /// 要約に許す長さ。50字まで詰めさせると、複数の事実をひとつに丸めた
+    /// 取り違えが起きた（「生命保険料控除証明書」→「保険証券」など）ため、
+    /// 少し緩めて「収まらないなら捨てる」を明示する方が安全だった。
+    static let defaultLimit = 60
+
     /// 要約の指示文。実体によらず同じ条件を課す。
+    /// 字数を詰めるための言い換え・統合が事実の取り違えを生むので、
+    /// 「丸めずに捨てる」ことを最優先で命じる。
     static func instructions(limit: Int) -> String {
         """
-        与えられた通知の本文を、日本語で\(limit)文字以内の1文に要約してください。
-        要約文だけを出力し、前置き・引用符・改行は付けないでください。
+        次の通知を、画面を一度だけ流れるテロップ用に短くしてください。
+
+        制約:
+        - 日本語、全角\(limit)文字以内、1〜2文。
+        - 冒頭に結論（何が起きたか／利用者が何をすべきか）を置く。原因や経緯は結論の後に回す。
+        - 日付・時刻・金額・件数・書類名・製品名・行番号などの固有名詞と数値は、原文にある表記をそのまま使う。
+        - \(limit)文字に収まらないときは、重要度の低い事実を丸ごと捨てる。
+          複数の事実をひとつにまとめたり、上位概念に置き換えたりしてはいけない。
+          悪い例:「生命保険料控除証明書」を「保険証券」と書く。
+          悪い例:「予約は今週金曜」と「発売は来月15日」を「来月」とまとめる。
+          良い例: 収まらないなら発売日のほうを書かずに落とす。
+        - 原文にない語を足さない。推測で補わない。
+        - 敬語・挨拶・前置きは削る。文末は言い切る。
+
+        出力は要約本文のみ。前置きや説明を書かないこと。
         """
     }
 
@@ -82,7 +102,7 @@ enum NotificationSummarizer {
     static func summarize(
         _ text: String,
         using backend: Backend,
-        limit: Int = 50,
+        limit: Int = defaultLimit,
         timeout: TimeInterval = 20
     ) async -> String? {
         switch backend {
@@ -111,7 +131,9 @@ enum NotificationSummarizer {
             "stream": false,
             // 思考過程を出すモデルでも要約だけを受け取る。
             "think": false,
-            "options": ["temperature": 0.2, "num_predict": 120]
+            // 読み込み済みのモデルを保持し、間が空いたあとの初回で待たされないようにする。
+            "keep_alive": "30m",
+            "options": ["temperature": 0.2, "num_predict": 160]
         ]
         guard let body = try? JSONSerialization.data(withJSONObject: payload) else { return nil }
         request.httpBody = body
@@ -125,7 +147,7 @@ enum NotificationSummarizer {
 
     /// 本文を指定文字数以内へ要約する。失敗・時間切れは nil。
     /// ティッカーを待たせないよう、応答が遅ければ諦める。
-    static func summarize(_ text: String, limit: Int = 50, timeout: TimeInterval = 10) async -> String? {
+    static func summarize(_ text: String, limit: Int = defaultLimit, timeout: TimeInterval = 10) async -> String? {
         #if canImport(FoundationModels)
         guard #available(macOS 26.0, *), isUsable else { return nil }
         let work = Task { () -> String? in
