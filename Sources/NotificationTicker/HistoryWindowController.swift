@@ -138,7 +138,7 @@ final class HistoryWindowController: NSWindowController, NSTableViewDataSource, 
         countLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
 
         let note = NSTextField(
-            wrappingLabelWithString: "下線のある行をダブルクリックすると記事ページを開きます。履歴はこのアプリを終了すると消えます（内容を保存しません）。"
+            wrappingLabelWithString: "下線のある行をダブルクリックすると記事ページを開きます。履歴は /tmp に保存され、Mac を再起動すると消えます。"
         )
         note.textColor = .secondaryLabelColor
         note.font = .systemFont(ofSize: 11)

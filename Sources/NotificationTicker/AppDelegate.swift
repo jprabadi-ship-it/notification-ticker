@@ -12,7 +12,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var statusMenuItem: NSMenuItem!
     private var toggleMenuItem: NSMenuItem!
-    /// 流したメッセージの記録（メモリ上のみ）。
+    /// 流したメッセージの記録。/tmp に置き、Mac の再起動で消える。
     private let history = DisplayHistory()
     private lazy var historyController = HistoryWindowController(history: history)
     private var activeSound: NSSound?
