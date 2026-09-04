@@ -203,8 +203,9 @@ final class TickerTextStylerTests: XCTestCase {
     }
 
     func testCondensesOnlyOverlongText() {
-        let short = String(repeating: "あ", count: 200)
-        let long = String(repeating: "い", count: 201)
+        let threshold = TickerTextLayout.longTextThreshold
+        let short = String(repeating: "あ", count: threshold)
+        let long = String(repeating: "い", count: threshold + 1)
 
         XCTAssertEqual(TickerTextLayout.condensed(short), short)
         XCTAssertEqual(TickerTextLayout.condensed(long), String(repeating: "い", count: 50) + "…")

@@ -108,7 +108,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let backend = NotificationSummarizer.backend(
                 localModel: self.settings.effectiveLocalSummarizerModel
             )
-            if fullText.count > 200, let backend {
+            if fullText.count > TickerTextLayout.longTextThreshold, let backend {
                 Task { @MainActor in
                     if let summary = await NotificationSummarizer.summarize(fullText, using: backend) {
                         enqueue("〔要約〕" + summary)

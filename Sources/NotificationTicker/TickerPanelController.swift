@@ -185,11 +185,17 @@ enum TickerTextLayout {
         return result.joined(separator: "\n")
     }
 
+    /// これを超えた通知は読み切れないまま流れていくだけなので、手を入れる。
+    /// 要約するときも切り詰めるときも、同じ長さを境目にする。
+    /// 会議変更・配送・決済といった日常的な通知が110〜135字に収まるため、
+    /// そこを拾える 100 にしている。
+    static let longTextThreshold = 100
+
     /// 長すぎる通知は読み切れないまま流れていくだけなので、思い切って切り詰める。
     /// しきい値を超えたものだけが対象。少し長い程度の通知はそのまま全文を流す。
     static func condensed(
         _ text: String,
-        threshold: Int = 200,
+        threshold: Int = longTextThreshold,
         limit: Int = 50
     ) -> String {
         guard text.count > threshold else { return text }
