@@ -91,6 +91,8 @@ v0.2.11 から Developer ID で署名し Apple の公証を受けているため
 
 ソースツリーが iCloud Drive や Google Drive などの同期フォルダ配下にある場合、その場所のバンドルではアクセシビリティ許可が安定しません。必ず `/Applications` 側を使ってください。
 
+同じ理由で、ビルドの作業場所（SwiftPM の scratch path）は `/tmp/NotificationTicker-build` に置いています。同期フォルダ上に `.build` を作ると、大量の小さな書き込みを同期ソフトが捕まえてビルドが固まることがあるためです。テストも同じ場所を使う `./scripts/test.sh` から実行してください。
+
 署名は Developer ID（identity ベース）なので、リビルドしてもアクセシビリティ許可は維持されます。許可後にアプリが反応しない場合は、アクセシビリティ一覧の `NotificationTicker` を `−` で削除し、`/Applications/NotificationTicker.app` を `+` で再追加してください。
 
 ## 配布用の .dmg を作る

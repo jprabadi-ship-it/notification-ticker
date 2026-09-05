@@ -2,7 +2,11 @@
 set -euo pipefail
 
 project_dir="${0:A:h:h}"
-build_dir="$project_dir/.build"
+# ビルドの作業場所は Google Drive の外に置く。同期フォルダ上では .build への
+# 大量の小さな書き込みを Google Drive が捕まえて I/O が止まり、swift-frontend が
+# CPU を使わずに眠ったまま返ってこないことがある（2026-09-05 に10分以上停止）。
+# /tmp は Mac の再起動で消えるが、その場合は次回にフルビルドされるだけ。
+build_dir="/tmp/NotificationTicker-build"
 dist_app="$project_dir/dist/NotificationTicker.app"
 install_dir="/Applications/NotificationTicker.app"
 
