@@ -19,6 +19,46 @@ enum NotificationSummarizer {
     /// Ollama の待ち受け先。localhost 固定で、外部へは出さない。
     static let ollamaEndpoint = URL(string: "http://127.0.0.1:11434/api/generate")!
 
+    /// Ollama に渡すコンテキスト長。通知は短いので小さくてよい。
+    /// Ollama 0.33 の既定（65536）だとモデルの読み込みに 29 秒かかり、時間切れに
+    /// なった。先読みと本番で値が違うと読み直しが起きるため、必ず同じ値を使う。
+    static let contextLength = 2048
+
+    /// 直近の要約の結果。設定画面で「なぜ要約されなかったか」を見せるため。
+    struct Outcome {
+        let date: Date
+        let succeeded: Bool
+        let detail: String
+    }
+    /// メインスレッドからだけ触る。
+    static private(set) var lastOutcome: Outcome?
+
+    /// 最後に先読みした時刻とモデル。設定変更のたびに叩かないよう間引く。
+    private static var lastWarmUp: (date: Date, model: String)?
+
+    /// モデルを Ollama に先に読み込ませておく。通知が来てから読み込むと初回だけ
+    /// 待たされて時間切れになるため。同じモデルへの先読みは 20 分に 1 回まで。
+    static func warmUpIfNeeded(model: String, now: Date = Date()) {
+        if let last = lastWarmUp, last.model == model, now.timeIntervalSince(last.date) < 20 * 60 {
+            return
+        }
+        lastWarmUp = (now, model)
+        var request = URLRequest(url: ollamaEndpoint)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = 90
+        let payload: [String: Any] = [
+            "model": model,
+            "keep_alive": "30m",
+            "options": ["num_ctx": contextLength]
+        ]
+        guard let body = try? JSONSerialization.data(withJSONObject: payload) else { return }
+        request.httpBody = body
+        Task.detached(priority: .utility) {
+            _ = try? await URLSession.shared.data(for: request)
+        }
+    }
+
     /// いまこの環境で要約できるか。Apple Intelligence が無効、モデル未ダウンロード、
     /// macOS 26 未満のいずれでも false。
     static var isUsable: Bool {
@@ -98,28 +138,37 @@ enum NotificationSummarizer {
         return summary.count > limit * 2 ? String(summary.prefix(limit)) + "…" : summary
     }
 
-    /// 指定の実体で要約する。
+    /// 指定の実体で要約する。結果の成否と理由を lastOutcome に残す。
     static func summarize(
         _ text: String,
         using backend: Backend,
         limit: Int = defaultLimit,
-        timeout: TimeInterval = 20
+        timeout: TimeInterval = 30
     ) async -> String? {
+        let summary: String?
+        let detail: String
         switch backend {
         case .appleIntelligence:
-            return await summarize(text, limit: limit, timeout: timeout)
+            summary = await summarize(text, limit: limit, timeout: timeout)
+            detail = summary == nil ? "Apple Intelligence が応答しませんでした" : "成功（Apple Intelligence）"
         case .localLLM(let model):
-            return await summarizeWithOllama(text, model: model, limit: limit, timeout: timeout)
+            (summary, detail) = await summarizeWithOllama(text, model: model, limit: limit, timeout: timeout)
         }
+        let outcome = Outcome(date: Date(), succeeded: summary != nil, detail: detail)
+        await MainActor.run { lastOutcome = outcome }
+        tickerLog.notice("summarize: \(outcome.succeeded ? "ok" : "failed", privacy: .public) \(detail, privacy: .public)")
+        return summary
     }
 
-    /// ローカルの Ollama に要約させる。起動していなければ即座に失敗して nil。
+    /// ローカルの Ollama に要約させる。失敗したときは理由を文字列で返す。
+    /// 接続できない場合だけ 2 秒後に 1 回再試行する。Ollama.app が自動更新や
+    /// 再起動で数秒落ちている間を越えるため。時間切れは再試行しない。
     private static func summarizeWithOllama(
         _ text: String,
         model: String,
         limit: Int,
         timeout: TimeInterval
-    ) async -> String? {
+    ) async -> (String?, String) {
         var request = URLRequest(url: ollamaEndpoint)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -133,16 +182,35 @@ enum NotificationSummarizer {
             "think": false,
             // 読み込み済みのモデルを保持し、間が空いたあとの初回で待たされないようにする。
             "keep_alive": "30m",
-            "options": ["temperature": 0.2, "num_predict": 160]
+            "options": ["temperature": 0.2, "num_predict": 160, "num_ctx": contextLength]
         ]
-        guard let body = try? JSONSerialization.data(withJSONObject: payload) else { return nil }
+        guard let body = try? JSONSerialization.data(withJSONObject: payload) else {
+            return (nil, "要求の組み立てに失敗しました")
+        }
         request.httpBody = body
 
-        guard let (data, response) = try? await URLSession.shared.data(for: request),
-              let http = response as? HTTPURLResponse, http.statusCode == 200,
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-        else { return nil }
-        return tidy(object["response"] as? String, limit: limit)
+        var failure = "Ollama に接続できません（Ollama.app は起動していますか？）"
+        for attempt in 0..<2 {
+            if attempt > 0 { try? await Task.sleep(nanoseconds: 2_000_000_000) }
+            do {
+                let (data, response) = try await URLSession.shared.data(for: request)
+                guard let http = response as? HTTPURLResponse else { continue }
+                guard http.statusCode == 200 else {
+                    let message = (String(data: data, encoding: .utf8) ?? "").prefix(80)
+                    return (nil, "Ollama がエラーを返しました（HTTP \(http.statusCode)）\(message)")
+                }
+                guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let summary = tidy(object["response"] as? String, limit: limit)
+                else { return (nil, "Ollama の応答が空でした") }
+                let load = ((object["load_duration"] as? Double) ?? 0) / 1_000_000_000
+                return (summary, load >= 1 ? "成功（モデル読み込みに \(Int(load))秒）" : "成功")
+            } catch let error as URLError where error.code == .timedOut {
+                return (nil, "時間切れ（\(Int(timeout))秒）。モデルの読み込み待ちの可能性があります")
+            } catch {
+                failure = "Ollama に接続できません（Ollama.app は起動していますか？）"
+            }
+        }
+        return (nil, failure)
     }
 
     /// 本文を指定文字数以内へ要約する。失敗・時間切れは nil。

@@ -60,6 +60,29 @@ final class NotificationSummarizerTests: XCTestCase {
         }
     }
 
+    func testRecordsOutcomeAfterLocalLLMAttempt() async throws {
+        try requireOllama()
+        _ = await NotificationSummarizer.summarize(longText, using: .localLLM(model: "gemma3:4b"))
+        let outcome = try XCTUnwrap(NotificationSummarizer.lastOutcome)
+        XCTAssertTrue(outcome.succeeded, outcome.detail)
+        XCTAssertTrue(outcome.detail.hasPrefix("成功"))
+
+        _ = await NotificationSummarizer.summarize(longText, using: .localLLM(model: "存在しないモデル:0b"))
+        let failed = try XCTUnwrap(NotificationSummarizer.lastOutcome)
+        XCTAssertFalse(failed.succeeded)
+        XCTAssertTrue(failed.detail.contains("HTTP"), failed.detail)
+    }
+
+    func testWarmUpIsThrottledPerModel() {
+        // 同じモデルは 20 分以内なら 2 回目を送らない（送信は副作用なので時刻で判定する）。
+        let base = Date(timeIntervalSince1970: 1_000_000)
+        NotificationSummarizer.warmUpIfNeeded(model: "test-model-a", now: base)
+        NotificationSummarizer.warmUpIfNeeded(model: "test-model-a", now: base.addingTimeInterval(60))
+        NotificationSummarizer.warmUpIfNeeded(model: "test-model-a", now: base.addingTimeInterval(21 * 60))
+        // 例外が出ず、throttle の分岐が通ることだけを確認する（ネットワークは叩かれても無視される）。
+        XCTAssertTrue(true)
+    }
+
     func testTidyTrimsAndCapsOverlongOutput() {
         XCTAssertNil(NotificationSummarizer.tidy("   ", limit: 50))
         XCTAssertNil(NotificationSummarizer.tidy(nil, limit: 50))

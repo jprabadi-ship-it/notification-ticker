@@ -23,6 +23,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var leadingSoundLoops: Bool?
     private var soundFadeTimer: Timer?
     private var quietHoursTimer: Timer?
+    private var summarizerWarmUpTimer: Timer?
     private var isQuietHoursActive = false
     /// 緊急地震速報を出している間だけ、睡眠時間帯の停止を上書きする期限。
     private var emergencyOverrideUntil: Date?
@@ -188,6 +189,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         configureStatusItem()
         startQuietHoursTimer()
         updateQuietHoursState(force: true)
+        warmUpSummarizerIfNeeded()
+        // 30 分で解放されるので、その前に読み込み直しておく（20分に1回まで）。
+        summarizerWarmUpTimer = Timer.scheduledTimer(withTimeInterval: 10 * 60, repeats: true) { [weak self] _ in
+            self?.warmUpSummarizerIfNeeded()
+        }
         previewNHKAfterFeedBehaviorUpgradeIfNeeded()
         if !monitor.isTrusted {
             settingsController.showWindow(nil)
@@ -404,6 +410,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         updateToggleMenuItem()
         if !isQuietHoursActive { eewMonitor.configure() }
         updateQuietHoursState(force: true)
+        warmUpSummarizerIfNeeded()
+    }
+
+    /// ローカル LLM で要約する設定なら、モデルを先に読み込ませておく。
+    private func warmUpSummarizerIfNeeded() {
+        guard !NotificationSummarizer.isUsable,
+              let model = settings.effectiveLocalSummarizerModel else { return }
+        NotificationSummarizer.warmUpIfNeeded(model: model)
     }
 
     private func updateQuietHoursState(force: Bool) {

@@ -108,8 +108,20 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         } else {
             detail = "\(NotificationSummarizer.availabilityDescription)。要約せず50文字で切り詰めます"
         }
-        summarizerStatusLabel.stringValue = "長文通知の要約（実験的）: " + detail
+        var lines = ["長文通知の要約（実験的）: " + detail]
+        if let outcome = NotificationSummarizer.lastOutcome {
+            let time = Self.outcomeTimeFormatter.string(from: outcome.date)
+            lines.append("最後の要約 \(time): " + (outcome.succeeded ? "" : "失敗 — ") + outcome.detail)
+        }
+        summarizerStatusLabel.stringValue = lines.joined(separator: "\n")
     }
+
+    private static let outcomeTimeFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "ja_JP")
+        formatter.dateFormat = "HH:mm"
+        return formatter
+    }()
 
     @objc private func localSummarizerEnabledChanged(_ sender: NSButton) {
         settings.localSummarizerEnabled = sender.state == .on
@@ -391,6 +403,8 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         let localSummarizerRow = makePopupRowLike(label: "使用モデル", field: localSummarizerField)
 
         summarizerStatusLabel.font = .systemFont(ofSize: 11)
+        summarizerStatusLabel.maximumNumberOfLines = 2
+        summarizerStatusLabel.lineBreakMode = .byTruncatingTail
         summarizerStatusLabel.textColor = .secondaryLabelColor
         updateSummarizerStatus()
 
