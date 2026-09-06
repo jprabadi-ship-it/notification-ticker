@@ -190,8 +190,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         startQuietHoursTimer()
         updateQuietHoursState(force: true)
         warmUpSummarizerIfNeeded()
-        // 30 分で解放されるので、その前に読み込み直しておく（20分に1回まで）。
-        summarizerWarmUpTimer = Timer.scheduledTimer(withTimeInterval: 10 * 60, repeats: true) { [weak self] _ in
+        // 30 分で解放されるほか、Ollama の再起動でも消えるので、5 分ごとに載っているか確かめる。
+        summarizerWarmUpTimer = Timer.scheduledTimer(withTimeInterval: 5 * 60, repeats: true) { [weak self] _ in
             self?.warmUpSummarizerIfNeeded()
         }
         previewNHKAfterFeedBehaviorUpgradeIfNeeded()
@@ -417,7 +417,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func warmUpSummarizerIfNeeded() {
         guard !NotificationSummarizer.isUsable,
               let model = settings.effectiveLocalSummarizerModel else { return }
-        NotificationSummarizer.warmUpIfNeeded(model: model)
+        NotificationSummarizer.ensureWarm(model: model)
     }
 
     private func updateQuietHoursState(force: Bool) {

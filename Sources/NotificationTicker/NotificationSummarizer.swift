@@ -33,30 +33,59 @@ enum NotificationSummarizer {
     /// メインスレッドからだけ触る。
     static private(set) var lastOutcome: Outcome?
 
-    /// 最後に先読みした時刻とモデル。設定変更のたびに叩かないよう間引く。
-    private static var lastWarmUp: (date: Date, model: String)?
+    /// Ollama が保持しているモデルの一覧。
+    static let ollamaProcessesEndpoint = URL(string: "http://127.0.0.1:11434/api/ps")!
 
-    /// モデルを Ollama に先に読み込ませておく。通知が来てから読み込むと初回だけ
-    /// 待たされて時間切れになるため。同じモデルへの先読みは 20 分に 1 回まで。
-    static func warmUpIfNeeded(model: String, now: Date = Date()) {
-        if let last = lastWarmUp, last.model == model, now.timeIntervalSince(last.date) < 20 * 60 {
-            return
-        }
-        lastWarmUp = (now, model)
-        var request = URLRequest(url: ollamaEndpoint)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.timeoutInterval = 90
-        let payload: [String: Any] = [
-            "model": model,
-            "keep_alive": "30m",
-            "options": ["num_ctx": contextLength]
-        ]
-        guard let body = try? JSONSerialization.data(withJSONObject: payload) else { return }
-        request.httpBody = body
+    /// 最後に先読みを試みた時刻。スライダー操作などで設定変更が連続しても
+    /// 1 分に 1 回しか確かめに行かない。
+    private static var lastWarmUpAttempt: Date?
+
+    /// モデルが Ollama に載っているか確かめ、載っていなければ読み込ませる。
+    /// 通知が来てから読み込むと初回だけ待たされるため、先に載せておく。
+    /// Ollama の再起動でモデルが消えても、次の確認で載せ直す。
+    static func ensureWarm(model: String, now: Date = Date()) {
+        if let last = lastWarmUpAttempt, now.timeIntervalSince(last) < 60 { return }
+        lastWarmUpAttempt = now
         Task.detached(priority: .utility) {
+            if await isLoaded(model: model) { return }
+            var request = URLRequest(url: ollamaEndpoint)
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.timeoutInterval = 90
+            let payload: [String: Any] = [
+                "model": model,
+                "keep_alive": "30m",
+                "options": ["num_ctx": contextLength]
+            ]
+            guard let body = try? JSONSerialization.data(withJSONObject: payload) else { return }
+            request.httpBody = body
             _ = try? await URLSession.shared.data(for: request)
         }
+    }
+
+    /// /api/ps に同名のモデルが、こちらと同じコンテキスト長で載っているか。
+    /// コンテキスト長が違うと本番の要求で読み直しが起きるので、載っていない扱いにする。
+    static func isLoaded(model: String) async -> Bool {
+        var request = URLRequest(url: ollamaProcessesEndpoint)
+        request.timeoutInterval = 5
+        guard let (data, _) = try? await URLSession.shared.data(for: request),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let models = object["models"] as? [[String: Any]]
+        else { return false }
+        return models.contains { entry in
+            let listed = (entry["name"] as? String) ?? (entry["model"] as? String) ?? ""
+            let context = (entry["context_length"] as? Int) ?? 0
+            return modelNameMatches(listed: listed, wanted: model) && context == contextLength
+        }
+    }
+
+    /// 「gemma3:4b」と「gemma3:4b」、タグ省略の「gemma3」と「gemma3:latest」を同じとみなす。
+    static func modelNameMatches(listed: String, wanted: String) -> Bool {
+        func normalized(_ name: String) -> String {
+            let trimmed = name.trimmingCharacters(in: .whitespaces)
+            return trimmed.contains(":") ? trimmed : trimmed + ":latest"
+        }
+        return normalized(listed) == normalized(wanted)
     }
 
     /// いまこの環境で要約できるか。Apple Intelligence が無効、モデル未ダウンロード、
