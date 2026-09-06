@@ -10,7 +10,29 @@ final class NotificationSummarizerTests: XCTestCase {
     """
 
     /// Ollama が起動しているときだけ実行する。CI や未導入環境では省略。
+    /// モデルが解放されていると最初の要求が読み込み待ちで時間切れになり、アプリの
+    /// 論理ではなく Ollama の状態を測ることになるので、確認のあとで先に載せておく。
     private func requireOllama() throws {
+        try requireOllamaReachable()
+        warmModel()
+    }
+
+    private func warmModel() {
+        var request = URLRequest(url: NotificationSummarizer.ollamaEndpoint)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = 120
+        request.httpBody = try? JSONSerialization.data(withJSONObject: [
+            "model": "gemma3:4b",
+            "keep_alive": "30m",
+            "options": ["num_ctx": NotificationSummarizer.contextLength]
+        ])
+        let semaphore = DispatchSemaphore(value: 0)
+        URLSession.shared.dataTask(with: request) { _, _, _ in semaphore.signal() }.resume()
+        _ = semaphore.wait(timeout: .now() + 120)
+    }
+
+    private func requireOllamaReachable() throws {
         var request = URLRequest(url: URL(string: "http://127.0.0.1:11434/api/version")!)
         request.timeoutInterval = 2
         let semaphore = DispatchSemaphore(value: 0)
