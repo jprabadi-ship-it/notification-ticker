@@ -82,47 +82,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         monitor.onNotification = { [weak self] notification in
-            guard let self, !self.isQuietHoursActive else { return }
-            // 状態判定と重複判定は全文で行い、表示だけを切り詰める。
-            guard self.deduplicator.shouldEmit(notification.tickerText) else { return }
-            let displayText = TickerTextLayout.condensed(notification.tickerText)
-            // Claude Code の状態（Bash実行待ち・許可待ち・入力待ち・応答完了）ごとに音を変えられる。
-            // 通知の読み取りでアプリ名やタイトルが欠けることがあるため、AIツール判定には
-            // 頼らず、本文の目印だけで状態を見分ける。目印は Clauminella 固有の文言なので
-            // 他アプリと衝突しない。
-            let status = ClaudeCodeStatus.detect(in: notification.tickerText)
-            let statusSound = status.flatMap { self.settings.soundSelection(forClaudeStatus: $0) }
-            let isAITool = status != nil || TickerTextStyler.isAIToolNotification(
+            self?.present(
+                notificationText: notification.tickerText,
                 appName: notification.appName,
                 title: notification.title
             )
-            // 状態の知らせは1回鳴れば足りるので、ループさせない。
-            let enqueue: (String) -> Void = { [weak self] text in
-                self?.tickerController.enqueue(
-                    TickerTextLayout.insertingTime(Date(), into: text),
-                    badge: TickerTextStyler.notificationBadge,
-                    badgeColor: isAITool ? TickerTextStyler.aiBadgeColor : nil,
-                    soundSelection: statusSound,
-                    soundLoops: statusSound != nil ? false : nil
-                )
-            }
-            // 長文は Apple Intelligence で要約を試みる（実験的・端末内処理）。
-            // 使えない・失敗・時間切れなら従来どおり切り詰める。
-            let fullText = notification.tickerText
-            let backend = NotificationSummarizer.backend(
-                localModel: self.settings.effectiveLocalSummarizerModel
-            )
-            if fullText.count > TickerTextLayout.longTextThreshold, let backend {
-                Task { @MainActor in
-                    if let summary = await NotificationSummarizer.summarize(fullText, using: backend) {
-                        enqueue("〔要約〕" + summary)
-                    } else {
-                        enqueue(TickerTextLayout.condensed(fullText))
-                    }
-                }
-            } else {
-                enqueue(displayText)
-            }
         }
         monitor.onStatusChange = { [weak self] status in
             guard let self else { return }
@@ -190,6 +154,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         startQuietHoursTimer()
         updateQuietHoursState(force: true)
         warmUpSummarizerIfNeeded()
+        presentPendingTestMessageIfAny()
         // 30 分で解放されるほか、Ollama の再起動でも消えるので、5 分ごとに載っているか確かめる。
         summarizerWarmUpTimer = Timer.scheduledTimer(withTimeInterval: 5 * 60, repeats: true) { [weak self] _ in
             self?.warmUpSummarizerIfNeeded()
@@ -267,6 +232,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         test.target = self
         menu.addItem(test)
 
+        let longTest = NSMenuItem(title: "テスト表示（長文・要約）", action: #selector(showLongTestMessage), keyEquivalent: "l")
+        longTest.target = self
+        menu.addItem(longTest)
+
         let historyItem = NSMenuItem(title: "表示履歴…", action: #selector(showHistory), keyEquivalent: "h")
         historyItem.target = self
         menu.addItem(historyItem)
@@ -284,6 +253,73 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func toggleTicker() {
         settings.isEnabled.toggle()
+    }
+
+    /// 通知の本文をティッカーへ流す共通経路。実通知とテスト表示の両方が通る。
+    /// 状態判定と重複判定は全文で行い、表示だけを要約または切り詰める。
+    private func present(
+        notificationText fullText: String,
+        appName: String?,
+        title: String?,
+        deduplicate: Bool = true
+    ) {
+        guard !isQuietHoursActive else { return }
+        if deduplicate, !deduplicator.shouldEmit(fullText) { return }
+        // Claude Code の状態（Bash実行待ち・許可待ち・入力待ち・応答完了）ごとに音を変えられる。
+        // 通知の読み取りでアプリ名やタイトルが欠けることがあるため、AIツール判定には
+        // 頼らず、本文の目印だけで状態を見分ける。目印は Clauminella 固有の文言なので
+        // 他アプリと衝突しない。
+        let status = ClaudeCodeStatus.detect(in: fullText)
+        let statusSound = status.flatMap { settings.soundSelection(forClaudeStatus: $0) }
+        let isAITool = status != nil || TickerTextStyler.isAIToolNotification(appName: appName, title: title)
+        // 状態の知らせは1回鳴れば足りるので、ループさせない。
+        let enqueue: (String) -> Void = { [weak self] text in
+            self?.tickerController.enqueue(
+                TickerTextLayout.insertingTime(Date(), into: text),
+                badge: TickerTextStyler.notificationBadge,
+                badgeColor: isAITool ? TickerTextStyler.aiBadgeColor : nil,
+                soundSelection: statusSound,
+                soundLoops: statusSound != nil ? false : nil
+            )
+        }
+        // 長文は要約を試みる（Apple Intelligence またはローカル LLM。端末内処理）。
+        // 使えない・失敗・時間切れなら従来どおり切り詰める。
+        let backend = NotificationSummarizer.backend(localModel: settings.effectiveLocalSummarizerModel)
+        if fullText.count > TickerTextLayout.longTextThreshold, let backend {
+            Task { @MainActor in
+                if let summary = await NotificationSummarizer.summarize(fullText, using: backend) {
+                    enqueue("〔要約〕" + summary)
+                } else {
+                    enqueue(TickerTextLayout.condensed(fullText))
+                }
+            }
+        } else {
+            enqueue(TickerTextLayout.condensed(fullText))
+        }
+    }
+
+    /// 長文の要約経路を確かめるための架空ニュース（約200字）。実在の出来事ではない。
+    static let longTestMessage = """
+    架空ニュース  •  練馬区は本日、区内すべての小中学校で給食のメニューを児童が投票で選ぶ新制度を来年4月から始めると発表した。\
+    月に一度、候補3案から選ぶ形式で、初回の候補にはカレーライス、鶏の唐揚げ、焼きそばが挙がっている。\
+    区教育委員会は「食への関心を高めたい」としており、投票結果は各校の掲示板と区の公式サイトで毎月公表される。\
+    保護者向けの説明会は今月20日に区役所で開かれる。
+    """
+
+    @objc private func showLongTestMessage() {
+        present(notificationText: Self.longTestMessage, appName: "テスト", title: "架空ニュース", deduplicate: false)
+    }
+
+    /// 起動時に一度だけ読む、外部から流し込むテスト文面。読んだら消す。
+    /// 同じユーザーの defaults 書き込み権限が要るので、設定画面と同じ信頼範囲。
+    private func presentPendingTestMessageIfAny() {
+        let key = "pendingTestMessage"
+        guard let text = UserDefaults.standard.string(forKey: key),
+              !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        UserDefaults.standard.removeObject(forKey: key)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
+            self?.present(notificationText: text, appName: "テスト", title: nil, deduplicate: false)
+        }
     }
 
     @objc private func showTestMessage() {
