@@ -709,6 +709,9 @@ final class TickerPanelController {
     private var globalScrollMonitor: Any?
     private var fadeGeneration = 0
     private var isSuppressed = false
+    /// ティッカーを見せている最中か。ウィンドウ自体は常に開いたままなので、
+    /// `panel.isVisible` では判定できない。
+    private var isPanelShown = false
 
     init(settings: TickerSettings) {
         self.settings = settings
@@ -749,7 +752,7 @@ final class TickerPanelController {
             let clickCount = event.clickCount
             DispatchQueue.main.async {
                 guard let self,
-                      self.panel.isVisible,
+                      self.isPanelShown,
                       self.panel.frame.contains(NSEvent.mouseLocation) else { return }
                 let windowPoint = self.panel.convertPoint(fromScreen: NSEvent.mouseLocation)
                 let viewPoint = self.tickerView.convert(windowPoint, from: nil)
@@ -767,7 +770,7 @@ final class TickerPanelController {
             let step: CGFloat = event.hasPreciseScrollingDeltas ? 1.0 : 12.0
             DispatchQueue.main.async {
                 guard let self,
-                      self.panel.isVisible,
+                      self.isPanelShown,
                       self.panel.frame.contains(NSEvent.mouseLocation) else { return }
                 // 上回しは早送り（左へ進める）、下回しは逆戻り（右へ戻す）。
                 self.tickerView.nudgeScroll(by: -normalized * step)
@@ -780,19 +783,18 @@ final class TickerPanelController {
             queue: .main
         ) { [weak self] _ in self?.reposition() }
 
-        // デスクトップ（操作スペース）を切り替えたとき、表示中のパネルが元の
-        // スペースに取り残されることがある。切替のたびに全スペース表示を宣言し直し、
-        // 出したままにする。
+        // デスクトップ（操作スペース）を切り替えたときの保険。ウィンドウは常に開いた
+        // ままなので本来は不要だが、macOS 側で割り当てが外れた場合に備えて宣言し直す。
         spaceObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.activeSpaceDidChangeNotification,
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            guard let self, self.panel.isVisible else { return }
+            guard let self else { return }
             self.applyAllSpacesBehavior()
             self.reposition()
             self.panel.orderFrontRegardless()
-            tickerLog.notice("space changed: re-shown")
+            if self.isPanelShown { tickerLog.notice("space changed: re-asserted") }
         }
 
         applySettings()
@@ -831,16 +833,13 @@ final class TickerPanelController {
     }
 
     func applySettings() {
-        panel.ignoresMouseEvents = settings.ignoresMouse
+        if isPanelShown { panel.ignoresMouseEvents = settings.ignoresMouse }
         reposition()
         tickerView.refreshLayout()
         if settings.isEnabled && !isSuppressed && tickerView.hasContent {
             showPanel()
         } else {
-            if panel.isVisible { onTickerWillHide?() }
-            fadeGeneration += 1
-            panel.orderOut(nil)
-            panel.alphaValue = 1
+            hidePanelImmediately()
         }
     }
 
@@ -848,15 +847,32 @@ final class TickerPanelController {
         isSuppressed = suppressed
         guard suppressed else { return }
         tickerView.clear()
-        if panel.isVisible { onTickerWillHide?() }
-        fadeGeneration += 1
-        panel.orderOut(nil)
-        panel.alphaValue = 1
+        hidePanelImmediately()
     }
 
     func dismiss() {
-        guard tickerView.hasContent || panel.isVisible else { return }
+        guard tickerView.hasContent || isPanelShown else { return }
         tickerView.clear()
+    }
+
+    /// 待機中はウィンドウを閉じずに透明にして残す。閉じて開き直すと、macOS が
+    /// 開き直した瞬間のデスクトップだけに置き直すことがあり、設定したディスプレイの
+    /// 他のデスクトップに出なくなる。開いたままなら全デスクトップへの割り当てが動かない。
+    private func hidePanelImmediately() {
+        if isPanelShown { onTickerWillHide?() }
+        isPanelShown = false
+        fadeGeneration += 1
+        panel.alphaValue = 0
+        // 透明でも当たり判定は残るので、隠している間は設定にかかわらず素通しにする。
+        panel.ignoresMouseEvents = true
+        keepPanelOrderedIn()
+    }
+
+    /// ウィンドウを開いた状態に保つ。初回と、何かの拍子に閉じられたときのため。
+    private func keepPanelOrderedIn() {
+        guard !panel.isVisible else { return }
+        applyAllSpacesBehavior()
+        panel.orderFrontRegardless()
     }
 
     /// クリックの振り分け。ダブルクリックは閉じる。シングルクリックは、その位置に
@@ -898,6 +914,8 @@ final class TickerPanelController {
         applyAllSpacesBehavior()
         tickerLog.notice("showPanel: frame=\(String(describing: self.panel.frame), privacy: .public)")
         fadeGeneration += 1
+        isPanelShown = true
+        panel.ignoresMouseEvents = settings.ignoresMouse
         NSAnimationContext.beginGrouping()
         NSAnimationContext.current.duration = 0
         panel.animator().alphaValue = 1
@@ -918,8 +936,9 @@ final class TickerPanelController {
             guard let self,
                   generation == self.fadeGeneration,
                   !self.tickerView.hasContent else { return }
-            self.panel.orderOut(nil)
-            self.panel.alphaValue = 1
+            // 閉じずに透明のまま残す（hidePanelImmediately と同じ理由）。
+            self.isPanelShown = false
+            self.panel.ignoresMouseEvents = true
         }
     }
 
