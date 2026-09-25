@@ -101,7 +101,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         feedMonitor.onHeadline = { [weak self] headline, urlString, link in
             guard let self else { return }
             guard !self.isQuietHoursActive else { return }
-            guard self.deduplicator.shouldEmit(headline) else { return }
+            guard self.deduplicator.shouldEmit(headline, allowsRecurring: false) else { return }
             self.tickerController.enqueue(
                 headline,
                 soundSelection: self.settings.soundSelection(forFeedURL: urlString),
@@ -116,7 +116,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard !self.isQuietHoursActive else { return }
             let text = self.settings.effectiveLocalAreaName
                 .map { report.tickerText(localArea: $0) } ?? report.tickerText
-            guard self.deduplicator.shouldEmit(text) else { return }
+            guard self.deduplicator.shouldEmit(text, allowsRecurring: false) else { return }
             self.tickerController.enqueue(
                 TickerTextLayout.insertingTime(Date(), into: text),
                 badge: TickerTextStyler.earthquakeBadge(forIntensity: report.maxIntensity),

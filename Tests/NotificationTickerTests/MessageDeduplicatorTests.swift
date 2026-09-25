@@ -66,6 +66,21 @@ final class MessageDeduplicatorTests: XCTestCase {
         XCTAssertTrue(deduplicator.shouldEmit(text, now: now.addingTimeInterval(3 * 60 + 1)))
     }
 
+    func testFeedHeadlineContainingMachiStaysBlockedForADay() {
+        let deduplicator = MessageDeduplicator(defaults: defaults)
+        let now = Date()
+        // ニュースの見出しに「待ち」が含まれていても、フィード由来は短い窓にしない。
+        let headline = "11:42  •  窓口での待ち時間のイライラ、AI作成のBGMで軽減なるか　東京・港区が実証実験"
+
+        XCTAssertTrue(deduplicator.shouldEmit(headline, allowsRecurring: false, now: now))
+        XCTAssertFalse(deduplicator.shouldEmit(headline, allowsRecurring: false, now: now.addingTimeInterval(5 * 60)))
+        XCTAssertFalse(deduplicator.shouldEmit(headline, allowsRecurring: false, now: now.addingTimeInterval(6 * 60 * 60)))
+        // 単なる「待ち」は、そもそも繰り返し通知の目印とみなさない。
+        XCTAssertFalse(MessageDeduplicator.isRecurring(headline))
+        XCTAssertTrue(MessageDeduplicator.isRecurring("許可待ち: 通知ウィジェット"))
+        XCTAssertTrue(MessageDeduplicator.isRecurring("Bash の実行を待っています"))
+    }
+
     func testKeepsLongWindowForOrdinaryNotices() {
         let deduplicator = MessageDeduplicator(defaults: defaults)
         let now = Date()

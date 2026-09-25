@@ -141,12 +141,13 @@ final class FeedMonitor {
     private let session: URLSession
     private var timer: DispatchSourceTimer?
     /// 表示済みの記事ID。再起動しても同じ記事を流し直さないよう永続化する。
-    private var seenIdentifiers: Set<String>
+    private var seenIdentifiers: RecentIdentifiers
     private var primedURLs: Set<String>
     private let seenKey = "feedSeenIdentifiers"
     private let primedKey = "feedPrimedURLs"
-    /// 記録しておく記事IDの上限。フィードの件数に対して十分な余裕を持たせる。
-    private let seenLimit = 500
+    /// 記録しておく記事IDの上限。フィード1本が50件、5本登録で250件が一度に
+    /// 流れ込むので、数回分を余裕で覚えられる大きさにする。
+    static let seenLimit = 2000
     /// この時間より古い記事は、新規に見つかっても表示しない。
     private let staleAge: TimeInterval = 6 * 60 * 60
     private var isPausedForQuietHours = false
@@ -154,7 +155,10 @@ final class FeedMonitor {
     init(settings: TickerSettings) {
         self.settings = settings
         let defaults = UserDefaults.standard
-        seenIdentifiers = Set(defaults.stringArray(forKey: seenKey) ?? [])
+        seenIdentifiers = RecentIdentifiers(
+            limit: Self.seenLimit,
+            initial: defaults.stringArray(forKey: seenKey) ?? []
+        )
         primedURLs = Set(defaults.stringArray(forKey: primedKey) ?? [])
         let configuration = URLSessionConfiguration.ephemeral
         configuration.timeoutIntervalForRequest = 20
@@ -269,7 +273,7 @@ final class FeedMonitor {
 
     private func persistSeen() {
         let defaults = UserDefaults.standard
-        defaults.set(Array(seenIdentifiers.suffix(seenLimit)), forKey: seenKey)
+        defaults.set(seenIdentifiers.ordered, forKey: seenKey)
         defaults.set(Array(primedURLs), forKey: primedKey)
     }
 
@@ -300,9 +304,6 @@ final class FeedMonitor {
                     link: Self.articleURL(for: item)
                 )
             }
-        }
-        if seenIdentifiers.count > seenLimit {
-            seenIdentifiers = Set(seenIdentifiers.suffix(seenLimit))
         }
         persistSeen()
         publishStatus("最終取得: \(feed.title)（\(feed.items.count)件）")

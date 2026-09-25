@@ -9,8 +9,11 @@ final class MessageDeduplicator {
     /// 24時間ブロックすると用をなさない。連投だけを抑える短い間隔にする。
     static let recurringWindow: TimeInterval = 3 * 60
 
+    /// Claude Code の状態通知に固有の言い回しだけに絞る。単に「待ち」を含む
+    /// だけだと、ニュースの見出し（「窓口での待ち時間」など）まで短い窓に落ちて
+    /// 取得のたびに再表示されてしまった。
     private static let recurringMarkers = [
-        "待ち", "待っています", "待機中", "waiting", "waits for"
+        "許可待ち", "入力待ち", "実行待ち", "を待っています", "待機中", "waiting for", "waits for"
     ]
 
     /// 繰り返し流したい通知かどうか。
@@ -37,12 +40,14 @@ final class MessageDeduplicator {
     }
 
     /// 表示してよければ true を返し、その時点で表示済みとして記録する。
-    func shouldEmit(_ text: String, now: Date = Date()) -> Bool {
+    /// `allowsRecurring` が false の発信元（フィード・地震）は、本文に「待ち」系の
+    /// 言葉があっても短い窓にせず、常に 24 時間ブロックする。
+    func shouldEmit(_ text: String, allowsRecurring: Bool = true, now: Date = Date()) -> Bool {
         let digest = Self.digest(for: text)
         guard !digest.isEmpty else { return false }
 
         prune(now: now)
-        let effectiveWindow = Self.isRecurring(text) ? Self.recurringWindow : window
+        let effectiveWindow = (allowsRecurring && Self.isRecurring(text)) ? Self.recurringWindow : window
         if let lastSeen = seen[digest], now.timeIntervalSince(lastSeen) < effectiveWindow {
             return false
         }
