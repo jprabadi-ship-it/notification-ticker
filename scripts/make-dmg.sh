@@ -26,6 +26,11 @@ out="$work/$dmg_name"
 hdiutil create -volname "NotificationTicker" -srcfolder "$staging" \
     -ov -format UDZO "$out" >/dev/null
 
+# dmg 自体にも署名する。中の .app だけ署名していると、Gatekeeper の判定は
+# 通る（開ける）が、dmg 単体の spctl 検査は「no usable signature」になる。
+codesign --force --timestamp --sign "Developer ID Application: Miyashita Kazuya (3HCG7Y94FX)" "$out"
+codesign --verify --strict "$out"
+
 # Apple の公証を通し、結果をステープルする。これで初回起動の
 # 「開発元を確認できません」が出なくなる。鍵は App Store Connect の APIキー。
 notary_key="$HOME/.appstoreconnect/private_keys/AuthKey_73NPSB9J6V.p8"
