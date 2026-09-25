@@ -69,6 +69,8 @@ final class TickerSettings {
         static let earthquakeMinimumIntensity = "earthquakeMinimumIntensity"
         static let earthquakeSoundSelection = "earthquakeSoundSelection"
         static let claudeStatusSoundSelections = "claudeStatusSoundSelections"
+        static let localSummarizerEnabled = "localSummarizerEnabled"
+        static let localSummarizerModel = "localSummarizerModel"
         static let localAreaEnabled = "localAreaEnabled"
         static let localAreaName = "localAreaName"
         static let eewEnabled = "eewEnabled"
@@ -269,6 +271,23 @@ final class TickerSettings {
     }
 
     /// 地震速報に自分の地点の震度を添えるか。
+    /// Apple Intelligence が使えないとき、ローカルの Ollama で要約するか（実験）。
+    var localSummarizerEnabled: Bool {
+        didSet { save(Key.localSummarizerEnabled, localSummarizerEnabled) }
+    }
+
+    /// Ollama に渡すモデル名。
+    var localSummarizerModel: String {
+        didSet { save(Key.localSummarizerModel, localSummarizerModel) }
+    }
+
+    /// 要約に使うローカルモデル。無効なら nil。
+    var effectiveLocalSummarizerModel: String? {
+        guard localSummarizerEnabled else { return nil }
+        let trimmed = localSummarizerModel.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
     var localAreaEnabled: Bool {
         didSet { save(Key.localAreaEnabled, localAreaEnabled) }
     }
@@ -367,6 +386,8 @@ final class TickerSettings {
             Key.earthquakeMinimumIntensity: "4",
             Key.earthquakeSoundSelection: "",
             Key.claudeStatusSoundSelections: [String: String](),
+            Key.localSummarizerEnabled: false,
+            Key.localSummarizerModel: "gemma3:4b",
             Key.localAreaEnabled: false,
             Key.localAreaName: "",
             Key.eewEnabled: false,
@@ -418,6 +439,8 @@ final class TickerSettings {
         earthquakeMinimumIntensity = defaults.string(forKey: Key.earthquakeMinimumIntensity) ?? "4"
         earthquakeSoundSelection = defaults.string(forKey: Key.earthquakeSoundSelection) ?? ""
         claudeStatusSoundSelections = defaults.dictionary(forKey: Key.claudeStatusSoundSelections) as? [String: String] ?? [:]
+        localSummarizerEnabled = defaults.bool(forKey: Key.localSummarizerEnabled)
+        localSummarizerModel = defaults.string(forKey: Key.localSummarizerModel) ?? "gemma3:4b"
         localAreaEnabled = defaults.bool(forKey: Key.localAreaEnabled)
         localAreaName = defaults.string(forKey: Key.localAreaName) ?? ""
         eewEnabled = defaults.bool(forKey: Key.eewEnabled)
