@@ -192,7 +192,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         let font = makeSlider(
             label: "文字サイズ",
             min: 12,
-            max: 60,
+            max: 100,
             value: settings.fontSize,
             action: #selector(fontChanged(_:)),
             valueLabel: fontValue
