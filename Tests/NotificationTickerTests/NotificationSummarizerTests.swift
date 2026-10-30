@@ -122,4 +122,77 @@ final class NotificationSummarizerTests: XCTestCase {
         let tidied = try? XCTUnwrap(NotificationSummarizer.tidy(overlong, limit: 50))
         XCTAssertEqual(tidied, String(repeating: "あ", count: 50) + "…")
     }
+
+    func testTidyDropsTrailingSentencesBeyondLimit() {
+        // TinySwallow の実際の返答（83字）。上限60字なら3文目以降を捨てる。
+        let raw = "2026年分の生命保険料控除証明書を発送しました。年末調整時に勤務先へ提出してください。"
+            + "11月20日までにカスタマーセンターへ連絡。マイページからもダウンロード可能。"
+        XCTAssertEqual(
+            NotificationSummarizer.tidy(raw, limit: 60),
+            "2026年分の生命保険料控除証明書を発送しました。年末調整時に勤務先へ提出してください。"
+        )
+        // 上限以内ならそのまま。
+        XCTAssertEqual(NotificationSummarizer.tidy("短い要約。二文目。", limit: 60), "短い要約。二文目。")
+    }
+
+    func testTidyKeepsNextSentenceWhenFirstIsTooShort() {
+        // 「ビルド失敗。」だけでは何も分からないので、上限の2倍までは次の文も残す。
+        let second = "Sources/App/Main.swift の 142 行目で型 'String' の値を 'Int' に変換できません。"
+        let raw = "ビルド失敗。" + second + "警告が3件。"
+        XCTAssertEqual(NotificationSummarizer.tidy(raw, limit: 60), "ビルド失敗。" + second)
+    }
+
+    func testSentencesSplitAfterTerminators() {
+        XCTAssertEqual(
+            NotificationSummarizer.sentences(of: "一。二！三？末尾"),
+            ["一。", "二！", "三？", "末尾"]
+        )
+    }
+
+    func testPromptStyleDependsOnModelSize() {
+        XCTAssertEqual(NotificationSummarizer.promptStyle(parameterCount: 1_543_714_304), .compact)  // TinySwallow
+        XCTAssertEqual(NotificationSummarizer.promptStyle(parameterCount: 1_728_801_536), .compact)  // LFM3
+        XCTAssertEqual(NotificationSummarizer.promptStyle(parameterCount: 4_299_915_632), .detailed) // gemma3:4b
+        // 分からなければ、大きいモデルで実績のある詳しい指示に倒す。
+        XCTAssertEqual(NotificationSummarizer.promptStyle(parameterCount: nil), .detailed)
+        XCTAssertEqual(NotificationSummarizer.promptStyle(parameterCount: 0), .detailed)
+    }
+
+    func testCompactPromptAsksForShorterTargetAndCarriesText() {
+        let prompt = NotificationSummarizer.compactPrompt(for: "本文テキスト", limit: 60)
+        XCTAssertTrue(prompt.contains("40文字以内"))
+        XCTAssertTrue(prompt.hasSuffix("本文テキスト"))
+    }
+
+    func testPresetsCoverGemmaAndTinySwallow() {
+        XCTAssertEqual(NotificationSummarizer.preset(matching: "gemma3:4b")?.model, "gemma3:4b")
+        XCTAssertEqual(
+            NotificationSummarizer.preset(matching: " hf.co/SakanaAI/TinySwallow-1.5B-Instruct-GGUF:Q8_0 ")?.model,
+            "hf.co/SakanaAI/TinySwallow-1.5B-Instruct-GGUF:Q8_0"
+        )
+        // 一覧にないモデルは「その他」扱い。
+        XCTAssertNil(NotificationSummarizer.preset(matching: "qwen3:8b"))
+        XCTAssertNil(NotificationSummarizer.preset(matching: ""))
+    }
+
+    func testInstalledModelsListsPresetsWhenOllamaIsUp() async throws {
+        try requireOllamaReachable()
+        let listed = await NotificationSummarizer.installedModels()
+        let installed = try XCTUnwrap(listed)
+        for preset in NotificationSummarizer.localModelPresets {
+            XCTAssertTrue(
+                installed.contains { NotificationSummarizer.modelNameMatches(listed: $0, wanted: preset.model) },
+                "\(preset.model) が一覧にない"
+            )
+        }
+    }
+
+    func testParameterCountComesFromOllama() async throws {
+        try requireOllamaReachable()
+        let count = await NotificationSummarizer.parameterCount(model: "gemma3:4b")
+        try XCTSkipIf(count == nil, "gemma3:4b が入っていないため省略")
+        XCTAssertEqual(NotificationSummarizer.promptStyle(parameterCount: count), .detailed)
+        let unknown = await NotificationSummarizer.parameterCount(model: "存在しないモデル:0b")
+        XCTAssertNil(unknown)
+    }
 }

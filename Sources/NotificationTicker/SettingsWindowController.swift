@@ -38,6 +38,9 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         target: nil,
         action: nil
     )
+    private let localSummarizerPopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    /// 「その他」を選んだときだけ見せる、モデル名の入力行。
+    private var localSummarizerCustomRow: NSStackView?
     private let localSummarizerField = NSTextField()
     private let fontPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let launchAtLoginCheckbox = NSButton(checkboxWithTitle: "ログイン時に開く", target: nil, action: nil)
@@ -95,6 +98,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         // 他の場所（システム設定）で変更されている場合があるので開くたびに読み直す。
         updateLaunchAtLoginCheckbox()
         updateSummarizerStatus()
+        refreshInstalledLocalModels()
         super.showWindow(sender)
     }
 
@@ -104,7 +108,8 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         if NotificationSummarizer.isUsable {
             detail = "Apple Intelligence を使用します"
         } else if let model = settings.effectiveLocalSummarizerModel {
-            detail = "\(NotificationSummarizer.availabilityDescription) → ローカル LLM（\(model)）を使用します"
+            let name = NotificationSummarizer.preset(matching: model)?.name ?? model
+            detail = "\(NotificationSummarizer.availabilityDescription) → ローカル LLM（\(name)）を使用します"
         } else {
             detail = "\(NotificationSummarizer.availabilityDescription)。要約せず50文字で切り詰めます"
         }
@@ -125,7 +130,65 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
 
     @objc private func localSummarizerEnabledChanged(_ sender: NSButton) {
         settings.localSummarizerEnabled = sender.state == .on
-        localSummarizerField.isEnabled = sender.state == .on
+        updateLocalSummarizerControls()
+        updateSummarizerStatus()
+    }
+
+    /// 選択肢を作り直す。installed が分かれば、入っていないモデルに印を付ける。
+    private func reloadLocalSummarizerPopup(installed: [String]?) {
+        localSummarizerPopup.removeAllItems()
+        for preset in NotificationSummarizer.localModelPresets {
+            let missing = installed.map { names in
+                !names.contains { NotificationSummarizer.modelNameMatches(listed: $0, wanted: preset.model) }
+            } ?? false
+            localSummarizerPopup.addItem(withTitle: preset.title + (missing ? " — 未インストール" : ""))
+            localSummarizerPopup.lastItem?.representedObject = preset.model
+        }
+        localSummarizerPopup.menu?.addItem(.separator())
+        localSummarizerPopup.addItem(withTitle: "その他（モデル名を入力）")
+        localSummarizerPopup.lastItem?.representedObject = nil
+
+        let current = settings.localSummarizerModel
+        if let preset = NotificationSummarizer.preset(matching: current),
+           let index = localSummarizerPopup.itemArray.firstIndex(where: {
+               ($0.representedObject as? String) == preset.model
+           }) {
+            localSummarizerPopup.selectItem(at: index)
+        } else {
+            localSummarizerPopup.selectItem(at: localSummarizerPopup.numberOfItems - 1)
+        }
+        updateLocalSummarizerControls()
+    }
+
+    /// 入っているモデルを Ollama に問い合わせて、選択肢の印を更新する。
+    private func refreshInstalledLocalModels() {
+        Task { [weak self] in
+            let installed = await NotificationSummarizer.installedModels()
+            await MainActor.run { self?.reloadLocalSummarizerPopup(installed: installed) }
+        }
+    }
+
+    private var isCustomLocalModelSelected: Bool {
+        localSummarizerPopup.selectedItem?.representedObject == nil
+    }
+
+    private func updateLocalSummarizerControls() {
+        let enabled = settings.localSummarizerEnabled
+        localSummarizerPopup.isEnabled = enabled
+        localSummarizerField.isEnabled = enabled
+        localSummarizerCustomRow?.isHidden = !isCustomLocalModelSelected
+    }
+
+    @objc private func localSummarizerPresetChanged(_ sender: NSPopUpButton) {
+        if let model = sender.selectedItem?.representedObject as? String {
+            settings.localSummarizerModel = model
+            localSummarizerField.stringValue = model
+        } else {
+            // 「その他」: 入力欄を出して、そこに書かれた名前を使う。
+            settings.localSummarizerModel = localSummarizerField.stringValue
+            window?.makeFirstResponder(localSummarizerField)
+        }
+        updateLocalSummarizerControls()
         updateSummarizerStatus()
     }
 
@@ -393,14 +456,19 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         localSummarizerCheckbox.action = #selector(localSummarizerEnabledChanged(_:))
         localSummarizerCheckbox.state = settings.localSummarizerEnabled ? .on : .off
 
+        localSummarizerPopup.target = self
+        localSummarizerPopup.action = #selector(localSummarizerPresetChanged(_:))
+        localSummarizerPopup.toolTip = "Ollama を起動しておく必要があります。要約は端末内で完結し、外部へは送信しません。"
+        let localSummarizerRow = makePopupRow(label: "使用モデル", popup: localSummarizerPopup)
+
         localSummarizerField.stringValue = settings.localSummarizerModel
-        localSummarizerField.placeholderString = "例: gemma3:4b"
+        localSummarizerField.placeholderString = "Ollama のモデル名（例: qwen3:8b）"
         localSummarizerField.target = self
         localSummarizerField.action = #selector(localSummarizerModelChanged(_:))
         localSummarizerField.delegate = self
-        localSummarizerField.isEnabled = settings.localSummarizerEnabled
-        localSummarizerField.toolTip = "Ollama を起動しておく必要があります。要約は端末内で完結し、外部へは送信しません。"
-        let localSummarizerRow = makePopupRowLike(label: "使用モデル", field: localSummarizerField)
+        let customRow = makePopupRowLike(label: "モデル名", field: localSummarizerField)
+        localSummarizerCustomRow = customRow
+        reloadLocalSummarizerPopup(installed: nil)
 
         summarizerStatusLabel.font = .systemFont(ofSize: 11)
         summarizerStatusLabel.maximumNumberOfLines = 2
@@ -482,7 +550,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
             claudeHeader,
         ] + claudeRows + [
             soundEnabled, volume, soundRow, soundsFolderRow, importSoundButton,
-            summarizerStatusLabel, localSummarizerCheckbox, localSummarizerRow, bottomRow
+            summarizerStatusLabel, localSummarizerCheckbox, localSummarizerRow, customRow, bottomRow
         ])
         stack.orientation = .vertical
         stack.alignment = .leading
