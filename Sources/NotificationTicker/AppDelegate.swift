@@ -15,8 +15,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// 流したメッセージの記録。/tmp に置き、Mac の再起動で消える。
     private let history = DisplayHistory()
     private lazy var historyController = HistoryWindowController(history: history)
-    private var activeSound: NSSound?
+    private var activeSound: NotificationSoundPlaying?
     private var activeSoundSelection: String?
+    /// いまの再生部品を、すき間なしループ用として作ったか。
+    private var activeSoundWantsGapless = false
     /// 先頭メッセージに割り当てられた音。nil なら共通の通知音を使う。
     private var leadingSoundSelection: String?
     /// 先頭メッセージによるループの上書き。nil なら音源ごとの設定に従う。
@@ -30,6 +32,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let until = emergencyOverrideUntil else { return false }
         return until > Date()
     }
+    /// 先頭の項目が地震の知らせか。消音設定を越えて鳴らす。
+    private var leadingSoundIsUrgent = false
+    /// 地震の音を鳴らす間だけ、Mac 本体の消音・小さすぎる音量を解く。
+    private let emergencyAudio = EmergencyAudioOverride(output: CoreAudioOutput())
+    /// 地震の音の最低音量。アプリの音量を絞っていても、これより小さくはしない。
+    static let urgentMinimumSoundVolume = 0.8
     /// 発信元をまたいで、同じ本文の24時間以内の再表示を防ぐ。
     private let deduplicator = MessageDeduplicator()
 
@@ -39,16 +47,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         tickerController = TickerPanelController(settings: settings)
         tickerController.onTickerWillHide = { [weak self] in self?.fadeOutNotificationSound() }
         tickerController.onTickerDidShow = { [weak self] in
-            guard let self, self.settings.soundEnabled else { return }
+            guard let self, self.shouldPlayLeadingSound else { return }
             self.playNotificationSound(looping: true)
         }
         // 先頭メッセージが変わったら、そのフィードに割り当てた音へ切り替える。
-        tickerController.tickerView.onLeadingSoundChange = { [weak self] selection, loops in
+        tickerController.tickerView.onLeadingSoundChange = { [weak self] selection, loops, urgent in
             guard let self else { return }
             self.leadingSoundSelection = selection
             self.leadingSoundLoops = loops
-            guard self.settings.soundEnabled, self.tickerController.panel.isVisible else { return }
-            self.playNotificationSound(looping: true)
+            self.leadingSoundIsUrgent = urgent
+            guard self.tickerController.panel.isVisible else { return }
+            if self.shouldPlayLeadingSound {
+                self.playNotificationSound(looping: true)
+            } else {
+                // 消音中に地震の音が鳴っていたら、次の項目に替わった時点で止める。
+                self.fadeOutNotificationSound()
+            }
         }
         settingsController = SettingsWindowController(settings: settings, monitor: monitor)
         feedMonitor = FeedMonitor(settings: settings)
@@ -119,7 +133,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.tickerController.enqueue(
                 TickerTextLayout.insertingTime(Date(), into: text),
                 badge: TickerTextStyler.earthquakeBadge(forIntensity: report.maxIntensity),
-                soundSelection: self.settings.effectiveEarthquakeSoundSelection
+                soundSelection: self.settings.effectiveEarthquakeSoundSelection,
+                urgentSound: true
             )
         }
         earthquakeMonitor.onStatusChange = { [weak self] status in
@@ -140,6 +155,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 TickerTextLayout.insertingTime(Date(), into: text),
                 badge: TickerTextStyler.earthquakeEvacuationBadge,
                 soundSelection: self.settings.effectiveEarthquakeSoundSelection,
+                urgentSound: true,
                 overridingSuppression: true
             )
         }
@@ -153,6 +169,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         startQuietHoursTimer()
         updateQuietHoursState(force: true)
         presentPendingTestMessageIfAny()
+        presentPendingEarthquakeTestIfAny()
         previewNHKAfterFeedBehaviorUpgradeIfNeeded()
         if !monitor.isTrusted {
             settingsController.showWindow(nil)
@@ -162,6 +179,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        // 地震の音のために解いた Mac 本体の消音を、終了時にも戻しておく。
+        emergencyAudio.end()
         monitor.stop()
         feedMonitor.stop()
         earthquakeMonitor.stop()
@@ -229,6 +248,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let longTest = NSMenuItem(title: "テスト表示（長文・要約）", action: #selector(showLongTestMessage), keyEquivalent: "l")
         longTest.target = self
         menu.addItem(longTest)
+
+        let earthquakeTest = NSMenuItem(
+            title: "テスト表示（地震の音）",
+            action: #selector(showEarthquakeTestMessage),
+            keyEquivalent: "e"
+        )
+        earthquakeTest.target = self
+        menu.addItem(earthquakeTest)
 
         let historyItem = NSMenuItem(title: "表示履歴…", action: #selector(showHistory), keyEquivalent: "h")
         historyItem.target = self
@@ -300,8 +327,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     保護者向けの説明会は今月20日に区役所で開かれる。
     """
 
+    /// 地震の知らせと同じ扱い（消音を越えて鳴らす）で、テスト文を流す。
+    @objc private func showEarthquakeTestMessage() {
+        guard !isQuietHoursActive else { return }
+        tickerController.enqueue(
+            TickerTextLayout.insertingTime(
+                Date(),
+                into: "テスト  •  地震の知らせの音の確認です。実際の地震ではありません"
+            ),
+            badge: TickerTextStyler.earthquakeBadge(forIntensity: "3"),
+            soundSelection: settings.effectiveEarthquakeSoundSelection,
+            urgentSound: true
+        )
+    }
+
     @objc private func showLongTestMessage() {
         present(notificationText: Self.longTestMessage, appName: "テスト", title: "架空ニュース", deduplicate: false)
+    }
+
+    /// 起動時に一度だけ、地震の音のテストを流す。読んだら消す。
+    private func presentPendingEarthquakeTestIfAny() {
+        let key = "pendingEarthquakeTest"
+        guard UserDefaults.standard.bool(forKey: key) else { return }
+        UserDefaults.standard.removeObject(forKey: key)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
+            self?.showEarthquakeTestMessage()
+        }
     }
 
     /// 起動時に一度だけ読む、外部から流し込むテスト文面。読んだら消す。
@@ -337,29 +388,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: true)
     }
 
+    /// 先頭の項目の音を鳴らすか。地震の知らせは「音を鳴らす」がオフでも鳴らす。
+    private var shouldPlayLeadingSound: Bool {
+        settings.soundEnabled || leadingSoundIsUrgent
+    }
+
+    /// いま鳴らす音の音量。地震の知らせは、アプリの音量を絞っていても最低限の大きさで鳴らす。
+    private func soundVolume(urgent: Bool) -> Float {
+        let volume = settings.soundVolume
+        return Float(urgent ? max(volume, Self.urgentMinimumSoundVolume) : volume)
+    }
+
     /// `overriding` を渡すと、先頭メッセージの割り当てを無視して指定の音を鳴らす（試聴用）。
     private func playNotificationSound(looping: Bool, overriding: String? = nil) {
         guard !isQuietHoursActive || isEmergencyOverrideActive else { return }
+        // 試聴は利用者の操作なので、消音を越える扱いにしない。
+        let urgent = overriding == nil && leadingSoundIsUrgent
+        if urgent { emergencyAudio.begin() } else { emergencyAudio.end() }
         soundFadeTimer?.invalidate()
         soundFadeTimer = nil
         let selection = overriding ?? leadingSoundSelection ?? settings.soundSelection
-        if activeSoundSelection != selection {
-            activeSound?.stop()
-            if selection.hasPrefix("file:") {
-                let path = String(selection.dropFirst("file:".count))
-                activeSound = NSSound(contentsOfFile: path, byReference: true)
-            } else {
-                let name = String(selection.dropFirst("system:".count))
-                activeSound = NSSound(named: NSSound.Name(name))
-            }
-            activeSoundSelection = selection
-        }
         // ループは、先頭メッセージに上書きがあればそれを、無ければ音源ごとの設定に従う。
         // 試聴（overriding 指定）のときは上書きを無視する。
         let itemLoops = overriding == nil ? leadingSoundLoops : nil
         let shouldLoop = looping && (itemLoops ?? settings.loopsSound(selection))
+        // 取り込んだ音声ファイルをループするときは、継ぎ目に空白が出ないよう専用の部品で鳴らす。
+        let wantsGapless = shouldLoop && selection.hasPrefix("file:")
+        if activeSoundSelection != selection || activeSoundWantsGapless != wantsGapless {
+            activeSound?.stop()
+            activeSound = makeSound(for: selection, gapless: wantsGapless)
+            activeSoundSelection = selection
+            activeSoundWantsGapless = wantsGapless
+        }
         if let activeSound {
-            activeSound.volume = Float(settings.soundVolume)
+            activeSound.volume = soundVolume(urgent: urgent)
             if shouldLoop && activeSound.isPlaying && activeSound.loops {
                 return
             }
@@ -371,8 +433,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    private func makeSound(for selection: String, gapless: Bool) -> NotificationSoundPlaying? {
+        if selection.hasPrefix("file:") {
+            let path = String(selection.dropFirst("file:".count))
+            if gapless, let player = GaplessLoopPlayer(url: URL(fileURLWithPath: path)) {
+                return player
+            }
+            return NSSound(contentsOfFile: path, byReference: true)
+        }
+        let name = String(selection.dropFirst("system:".count))
+        return NSSound(named: NSSound.Name(name))
+    }
+
     private func fadeOutNotificationSound(duration: TimeInterval = 0.45) {
-        guard let activeSound, activeSound.isPlaying else { return }
+        guard let activeSound, activeSound.isPlaying else {
+            emergencyAudio.end()
+            return
+        }
         soundFadeTimer?.invalidate()
 
         let startedAt = ProcessInfo.processInfo.systemUptime
@@ -392,6 +469,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 activeSound.loops = false
                 activeSound.volume = Float(self.settings.soundVolume)
                 self.soundFadeTimer = nil
+                self.emergencyAudio.end()
+                // すき間なしループ用の部品は曲全体を展開して持つ（70秒で約27MB）。
+                // 鳴らし終えたら手放し、次に鳴らすときに読み直す。
+                if activeSound is GaplessLoopPlayer {
+                    self.activeSound = nil
+                    self.activeSoundSelection = nil
+                }
             }
         }
         soundFadeTimer = timer
@@ -432,9 +516,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         tickerController.applySettings()
         // 再生中の音にも音量変更を即時反映する（フェード中は触らない）。
         if soundFadeTimer == nil {
-            activeSound?.volume = Float(settings.soundVolume)
+            activeSound?.volume = soundVolume(urgent: leadingSoundIsUrgent)
         }
-        if !settings.soundEnabled {
+        if !shouldPlayLeadingSound {
             fadeOutNotificationSound()
         }
         updateToggleMenuItem()

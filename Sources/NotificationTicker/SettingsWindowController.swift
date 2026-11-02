@@ -432,6 +432,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
             action: #selector(soundEnabledChanged(_:))
         )
         soundEnabled.state = settings.soundEnabled ? .on : .off
+        soundEnabled.toolTip = "オフでも、地震速報と緊急地震速報の音は鳴ります。Mac 本体が消音や80%未満でも、鳴っている間だけ消音を解いて80%にします。"
 
         soundPopup.target = self
         soundPopup.action = #selector(soundChanged(_:))

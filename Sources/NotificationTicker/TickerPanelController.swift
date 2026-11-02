@@ -254,6 +254,8 @@ final class TickerView: NSView {
         let soundSelection: String?
         /// ループの上書き。nil なら音源ごとの設定に従う。
         let soundLoops: Bool?
+        /// 地震の知らせ。消音設定を越えて鳴らす。
+        let isUrgent: Bool
         /// クリックで開くページ。フィードの記事など。
         let link: URL?
         var x: CGFloat
@@ -271,8 +273,13 @@ final class TickerView: NSView {
     private var previousTimestamp = ProcessInfo.processInfo.systemUptime
     var onActivityChange: ((Bool) -> Void)?
     /// 先頭メッセージが入れ替わり、鳴らすべき音が変わったときに呼ばれる。
-    var onLeadingSoundChange: ((String?, Bool?) -> Void)?
-    private var lastReportedSoundSelection: String??
+    /// 引数は音、ループの上書き、消音を越えて鳴らすか。
+    var onLeadingSoundChange: ((String?, Bool?, Bool) -> Void)?
+    private struct LeadingSound: Equatable {
+        let selection: String?
+        let isUrgent: Bool
+    }
+    private var lastReportedSound: LeadingSound?
     /// クリック（ビュー座標の位置と回数）。振り分けは呼び出し側が行う。
     var onClick: ((NSPoint, Int) -> Void)?
     var onContentMetricsChange: (() -> Void)?
@@ -327,6 +334,7 @@ final class TickerView: NSView {
     }
 
     var leadingSoundSelection: String? { items.first?.soundSelection }
+    var leadingSoundIsUrgent: Bool { items.first?.isUrgent ?? false }
 
     func enqueue(
         _ message: String,
@@ -334,6 +342,7 @@ final class TickerView: NSView {
         badgeColor: NSColor? = nil,
         soundSelection: String? = nil,
         soundLoops: Bool? = nil,
+        urgentSound: Bool = false,
         link: URL? = nil
     ) {
         let cleaned = TickerTextLayout.titleAndContentLines(
@@ -351,6 +360,7 @@ final class TickerView: NSView {
                 badgeColor: badgeColor ?? TickerTextStyler.backgroundColor(forBadge: badge),
                 soundSelection: soundSelection,
                 soundLoops: soundLoops,
+                isUrgent: urgentSound,
                 link: link,
                 x: startX,
                 width: measuredSize(of: cleaned).width,
@@ -368,15 +378,15 @@ final class TickerView: NSView {
 
     /// 先頭が入れ替わったときだけ通知する。毎フレーム鳴らし直さないための番人。
     private func notifyLeadingSoundIfNeeded() {
-        let selection = leadingSoundSelection
-        if let last = lastReportedSoundSelection, last == selection { return }
-        lastReportedSoundSelection = .some(selection)
-        onLeadingSoundChange?(selection, items.first?.soundLoops)
+        let leading = LeadingSound(selection: leadingSoundSelection, isUrgent: leadingSoundIsUrgent)
+        if lastReportedSound == leading { return }
+        lastReportedSound = leading
+        onLeadingSoundChange?(leading.selection, items.first?.soundLoops, leading.isUrgent)
     }
 
     func clear() {
         items.removeAll()
-        lastReportedSoundSelection = nil
+        lastReportedSound = nil
         onContentMetricsChange?()
         onActivityChange?(false)
         needsDisplay = true
@@ -478,7 +488,7 @@ final class TickerView: NSView {
             items = remaining
             onContentMetricsChange?()
             if items.isEmpty {
-                lastReportedSoundSelection = nil
+                lastReportedSound = nil
                 onActivityChange?(false)
             } else {
                 notifyLeadingSoundIfNeeded()
@@ -809,12 +819,14 @@ final class TickerPanelController {
     }
 
     /// `overridingSuppression` は緊急地震速報のように、睡眠時間帯でも必ず出すもの向け。
+    /// `urgentSound` は地震の知らせ向け。アプリや Mac 本体の消音を越えて鳴らす。
     func enqueue(
         _ text: String,
         badge: String = TickerTextStyler.badge,
         badgeColor: NSColor? = nil,
         soundSelection: String? = nil,
         soundLoops: Bool? = nil,
+        urgentSound: Bool = false,
         overridingSuppression: Bool = false,
         link: URL? = nil
     ) {
@@ -826,6 +838,7 @@ final class TickerPanelController {
             badgeColor: badgeColor,
             soundSelection: soundSelection,
             soundLoops: soundLoops,
+            urgentSound: urgentSound,
             link: link
         )
         guard settings.isEnabled else { return }
