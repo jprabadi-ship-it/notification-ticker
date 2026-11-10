@@ -114,6 +114,42 @@ final class EmergencyAudioTests: XCTestCase {
     }
 
     @MainActor
+    func testSoundSwitchesWhenNextMessageStartsShowing() {
+        // 音は、前のメッセージが流れ去ったときではなく、次のメッセージが画面に
+        // 入ってきた時点で切り替わる。
+        let view = TickerView(frame: NSRect(x: 0, y: 0, width: 800, height: 60), settings: TickerSettings())
+        var reports: [String?] = []
+        view.onLeadingSoundChange = { selection, _, _ in reports.append(selection) }
+
+        view.enqueue("一件目のお知らせ", soundSelection: "system:Glass")
+        view.enqueue("二件目のお知らせ", soundSelection: "system:Ping")
+        XCTAssertEqual(reports, ["system:Glass"], "二件目はまだ右の外で待っている")
+
+        // 少しずつ送り、二件目が入ってきた瞬間を探す。
+        var switchedWhileFirstVisible = false
+        for _ in 0..<2_000 where reports.count < 2 {
+            view.advance(by: 4)
+            if reports.count == 2 { switchedWhileFirstVisible = view.hasContent }
+        }
+        XCTAssertEqual(reports, ["system:Glass", "system:Ping"])
+        XCTAssertTrue(switchedWhileFirstVisible)
+        XCTAssertEqual(view.leadingSoundSelection, "system:Ping")
+    }
+
+    @MainActor
+    func testSoundKeepsPlayingWhileNothingHasStartedShowing() {
+        // 一件目が流れ去っても、二件目がまだ入ってこない間は音を切り替えない。
+        let view = TickerView(frame: NSRect(x: 0, y: 0, width: 800, height: 60), settings: TickerSettings())
+        var reports: [String?] = []
+        view.onLeadingSoundChange = { selection, _, _ in reports.append(selection) }
+        view.enqueue("短い", soundSelection: "system:Glass")
+        view.advance(by: 3_000)
+        XCTAssertFalse(view.hasContent)
+        view.enqueue("次", soundSelection: "system:Ping")
+        XCTAssertEqual(reports, ["system:Glass", "system:Ping"])
+    }
+
+    @MainActor
     func testUrgencyAloneChangesLeadingSoundReport() {
         // 地震の音が共通の通知音と同じでも、緊急かどうかが変われば知らせる。
         let view = TickerView(frame: NSRect(x: 0, y: 0, width: 800, height: 60), settings: TickerSettings())

@@ -50,7 +50,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self, self.shouldPlayLeadingSound else { return }
             self.playNotificationSound(looping: true)
         }
-        // 先頭メッセージが変わったら、そのフィードに割り当てた音へ切り替える。
+        // 次のメッセージの表示が始まったら、そのフィードに割り当てた音へ切り替える。
         tickerController.tickerView.onLeadingSoundChange = { [weak self] selection, loops, urgent in
             guard let self else { return }
             self.leadingSoundSelection = selection

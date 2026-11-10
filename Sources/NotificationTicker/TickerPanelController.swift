@@ -250,7 +250,8 @@ final class TickerView: NSView {
     private struct TickerItem {
         let text: String
         let badgeColor: NSColor
-        /// このメッセージが先頭にいる間に鳴らす音。nil なら共通の通知音。
+        /// このメッセージの表示が始まってから、次のメッセージの表示が始まるまで鳴らす音。
+        /// nil なら共通の通知音。
         let soundSelection: String?
         /// ループの上書き。nil なら音源ごとの設定に従う。
         let soundLoops: Bool?
@@ -272,7 +273,7 @@ final class TickerView: NSView {
     private let stripeScrollSpeed: CGFloat = 8
     private var previousTimestamp = ProcessInfo.processInfo.systemUptime
     var onActivityChange: ((Bool) -> Void)?
-    /// 先頭メッセージが入れ替わり、鳴らすべき音が変わったときに呼ばれる。
+    /// 新しいメッセージの表示が始まり、鳴らすべき音が変わったときに呼ばれる。
     /// 引数は音、ループの上書き、消音を越えて鳴らすか。
     var onLeadingSoundChange: ((String?, Bool?, Bool) -> Void)?
     private struct LeadingSound: Equatable {
@@ -333,8 +334,16 @@ final class TickerView: NSView {
         return items.first { $0.x <= position && position <= $0.x + $0.width }?.link
     }
 
-    var leadingSoundSelection: String? { items.first?.soundSelection }
-    var leadingSoundIsUrgent: Bool { items.first?.isUrgent ?? false }
+    /// 表示開始位置。メッセージはここから画面へ入ってくる。
+    private var entryX: CGFloat { scrollExtent + 24 }
+
+    /// いま音を受け持つメッセージ。表示が始まったもののうち、いちばん新しいもの。
+    /// 前のメッセージがまだ画面に残っていても、次のメッセージが入ってきた時点で
+    /// 音はそちらへ切り替える。
+    private var soundingItem: TickerItem? { items.last { $0.x <= entryX } }
+
+    var leadingSoundSelection: String? { soundingItem?.soundSelection }
+    var leadingSoundIsUrgent: Bool { soundingItem?.isUrgent ?? false }
 
     func enqueue(
         _ message: String,
@@ -353,7 +362,7 @@ final class TickerView: NSView {
         let wasEmpty = items.isEmpty
         // 直前のメッセージの末尾に続けて並べる。画面右端より手前には置かない。
         let trailing = items.map { $0.x + $0.width }.max()
-        let startX = max(scrollExtent + 24, (trailing ?? 0) + messageGap)
+        let startX = max(entryX, (trailing ?? 0) + messageGap)
         items.append(
             TickerItem(
                 text: cleaned,
@@ -376,12 +385,15 @@ final class TickerView: NSView {
         needsDisplay = true
     }
 
-    /// 先頭が入れ替わったときだけ通知する。毎フレーム鳴らし直さないための番人。
+    /// 音を受け持つメッセージが替わったときだけ通知する。毎フレーム鳴らし直さないための番人。
+    /// まだどれも表示が始まっていない（前のメッセージが流れ去り、次がまだ入ってこない）
+    /// 間は、今の音を鳴らし続ける。
     private func notifyLeadingSoundIfNeeded() {
-        let leading = LeadingSound(selection: leadingSoundSelection, isUrgent: leadingSoundIsUrgent)
+        guard let item = soundingItem else { return }
+        let leading = LeadingSound(selection: item.soundSelection, isUrgent: item.isUrgent)
         if lastReportedSound == leading { return }
         lastReportedSound = leading
-        onLeadingSoundChange?(leading.selection, items.first?.soundLoops, leading.isUrgent)
+        onLeadingSoundChange?(leading.selection, item.soundLoops, leading.isUrgent)
     }
 
     func clear() {
@@ -398,7 +410,7 @@ final class TickerView: NSView {
 
     /// フォントや表示位置が変わると文字幅も変わるため、幅を測り直して並べ直す。
     func refreshLayout() {
-        var nextX = scrollExtent + 24
+        var nextX = entryX
         for index in items.indices {
             items[index].width = measuredSize(of: items[index].text).width
             items[index].x = nextX
@@ -480,7 +492,14 @@ final class TickerView: NSView {
             return
         }
 
-        let distance = CGFloat(settings.speed * elapsed)
+        advance(by: CGFloat(settings.speed * elapsed))
+        needsDisplay = true
+    }
+
+    /// 全メッセージを左へ送り、流れ去ったものを外す。表示が始まったメッセージが
+    /// あれば、その音へ切り替える。
+    func advance(by distance: CGFloat) {
+        guard !items.isEmpty else { return }
         for index in items.indices { items[index].x -= distance }
 
         let remaining = items.filter { $0.x + $0.width >= 0 }
@@ -490,11 +509,10 @@ final class TickerView: NSView {
             if items.isEmpty {
                 lastReportedSound = nil
                 onActivityChange?(false)
-            } else {
-                notifyLeadingSoundIfNeeded()
+                return
             }
         }
-        needsDisplay = true
+        notifyLeadingSoundIfNeeded()
     }
 
     private var scrollExtent: CGFloat {
@@ -525,7 +543,7 @@ final class TickerView: NSView {
     func nudgeScroll(by delta: CGFloat) {
         guard let leading = items.first else { return }
         // 先頭のメッセージが表示開始位置より右へ戻らない範囲で、全体をまとめて動かす。
-        let clamped = min(delta, scrollExtent + 24 - leading.x)
+        let clamped = min(delta, entryX - leading.x)
         guard clamped != 0 else { return }
         for index in items.indices { items[index].x += clamped }
         needsDisplay = true
