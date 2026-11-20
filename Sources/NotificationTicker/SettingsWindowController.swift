@@ -300,7 +300,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         ignoreClockWeatherWidgets.state = settings.ignoresClockWeatherWidgets ? .on : .off
 
         quietHoursCheckbox.setButtonType(.switch)
-        quietHoursCheckbox.title = "睡眠時間帯は通知・ニュース・地震速報・音声を停止（緊急地震速報を除く）"
+        quietHoursCheckbox.title = "睡眠時間帯は通知・ニュース・音声を停止（地震の知らせは除く）"
         quietHoursCheckbox.target = self
         quietHoursCheckbox.action = #selector(quietHoursEnabledChanged(_:))
         quietHoursCheckbox.state = settings.quietHoursEnabled ? .on : .off

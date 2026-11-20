@@ -26,7 +26,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var soundFadeTimer: Timer?
     private var quietHoursTimer: Timer?
     private var isQuietHoursActive = false
-    /// 緊急地震速報を出している間だけ、睡眠時間帯の停止を上書きする期限。
+    /// 地震の知らせ（緊急地震速報・地震情報）を出している間だけ、睡眠時間帯の停止を上書きする期限。
     private var emergencyOverrideUntil: Date?
     private var isEmergencyOverrideActive: Bool {
         guard let until = emergencyOverrideUntil else { return false }
@@ -126,15 +126,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         earthquakeMonitor.onReport = { [weak self] report in
             guard let self else { return }
-            guard !self.isQuietHoursActive else { return }
             let text = self.settings.effectiveLocalAreaName
                 .map { report.tickerText(localArea: $0) } ?? report.tickerText
             guard self.deduplicator.shouldEmit(text, allowsRecurring: false) else { return }
+            // 地震情報も、睡眠時間帯にかかわらず表示して鳴らす。
+            self.beginEmergencyOverride()
             self.tickerController.enqueue(
                 TickerTextLayout.insertingTime(Date(), into: text),
                 badge: TickerTextStyler.earthquakeBadge(forIntensity: report.maxIntensity),
                 soundSelection: self.settings.effectiveEarthquakeSoundSelection,
-                urgentSound: true
+                urgentSound: true,
+                overridingSuppression: true
             )
         }
         earthquakeMonitor.onStatusChange = { [weak self] status in
@@ -149,7 +151,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             ) else { return }
             guard let text = report.tickerText(localArea: localArea) else { return }
             // 揺れが来る前の知らせなので、睡眠時間帯でも表示して鳴らす。
-            self.emergencyOverrideUntil = Date().addingTimeInterval(60)
+            self.beginEmergencyOverride()
             // 続報ごとに内容が変わるため、共通の重複判定は通さない。
             self.tickerController.enqueue(
                 TickerTextLayout.insertingTime(Date(), into: text),
@@ -327,9 +329,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     保護者向けの説明会は今月20日に区役所で開かれる。
     """
 
-    /// 地震の知らせと同じ扱い（消音を越えて鳴らす）で、テスト文を流す。
+    /// 地震の知らせと同じ扱い（消音や睡眠時間帯を越えて鳴らす）で、テスト文を流す。
     @objc private func showEarthquakeTestMessage() {
-        guard !isQuietHoursActive else { return }
+        beginEmergencyOverride()
         tickerController.enqueue(
             TickerTextLayout.insertingTime(
                 Date(),
@@ -337,8 +339,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             ),
             badge: TickerTextStyler.earthquakeBadge(forIntensity: "3"),
             soundSelection: settings.effectiveEarthquakeSoundSelection,
-            urgentSound: true
+            urgentSound: true,
+            overridingSuppression: true
         )
+    }
+
+    /// 地震の知らせを出す前に呼ぶ。しばらくの間、睡眠時間帯でも音を鳴らせるようにする。
+    private func beginEmergencyOverride() {
+        emergencyOverrideUntil = Date().addingTimeInterval(60)
     }
 
     @objc private func showLongTestMessage() {
@@ -537,8 +545,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             fadeOutNotificationSound()
             monitor.pauseForQuietHours()
             feedMonitor.pauseForQuietHours()
-            earthquakeMonitor.pauseForQuietHours()
-            // 緊急地震速報だけは止めない。揺れる前に知らせるためのもの。
+            // 地震の知らせ（地震情報・緊急地震速報）は止めない。寝ている間にも知らせる。
+            earthquakeMonitor.configure()
             eewMonitor.configure()
             statusMenuItem.title = NotificationMonitor.Status.pausedForQuietHours.label
             settingsController.updateStatus(.pausedForQuietHours)

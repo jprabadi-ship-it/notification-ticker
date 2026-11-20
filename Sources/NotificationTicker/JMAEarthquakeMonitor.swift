@@ -318,16 +318,6 @@ final class JMAEarthquakeMonitor {
         }
     }
 
-    func pauseForQuietHours() {
-        queue.async { [weak self] in
-            guard let self else { return }
-            self.monitoringEnabled = false
-            self.timer?.cancel()
-            self.timer = nil
-            self.publishStatus("睡眠時間帯のため地震速報停止中")
-        }
-    }
-
     private func scheduleNext(after delay: TimeInterval) {
         guard monitoringEnabled else { return }
         timer?.cancel()
