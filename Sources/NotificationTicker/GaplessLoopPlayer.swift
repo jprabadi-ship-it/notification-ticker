@@ -18,11 +18,15 @@ extension NSSound: NotificationSoundPlaying {}
 /// 毎回そのまま鳴らすため、ループの継ぎ目に空白ができる。ここではファイルを PCM に
 /// 展開して聞こえる範囲だけを残し、AVAudioPlayerNode の .loops でサンプル単位でつなぐ。
 /// 展開には時間がかかる（70秒の曲で約0.1秒）ので裏で行い、終わり次第鳴らし始める。
+///
+/// 操作は `callbackQueue` の上で行う前提で、読み込みの完了などもそこへ返す。
+/// アプリでは SoundPlayback の専用キューを渡し、メインスレッドでは鳴らさない。
 final class GaplessLoopPlayer: NotificationSoundPlaying {
     /// これより小さい振幅を無音とみなす（約 -50 dBFS）。
     static let silenceThreshold: Float = 0.00316
 
     private let url: URL
+    private let callbackQueue: DispatchQueue
     private let engine = AVAudioEngine()
     private let node = AVAudioPlayerNode()
     private var buffer: AVAudioPCMBuffer?
@@ -42,20 +46,23 @@ final class GaplessLoopPlayer: NotificationSoundPlaying {
     var isPlaying: Bool { wantsPlaying }
 
     /// 読めない形式なら nil。呼び出し側は NSSound に切り替える。
-    init?(url: URL) {
+    init?(url: URL, callbackQueue: DispatchQueue = .main) {
         guard let file = try? AVAudioFile(forReading: url), file.length > 0 else { return nil }
         self.url = url
+        self.callbackQueue = callbackQueue
         engine.attach(node)
         engine.connect(node, to: engine.mainMixerNode, format: file.processingFormat)
         // 出力装置が切り替わるとエンジンは止まる。鳴らしている途中なら付け直す。
         configurationObserver = NotificationCenter.default.addObserver(
             forName: .AVAudioEngineConfigurationChange,
             object: engine,
-            queue: .main
+            queue: nil
         ) { [weak self] _ in
-            guard let self, self.wantsPlaying else { return }
-            self.node.stop()
-            self.startIfReady()
+            callbackQueue.async {
+                guard let self, self.wantsPlaying else { return }
+                self.node.stop()
+                self.startIfReady()
+            }
         }
     }
 
@@ -89,9 +96,10 @@ final class GaplessLoopPlayer: NotificationSoundPlaying {
         guard !isLoading else { return }
         isLoading = true
         let url = url
+        let callbackQueue = callbackQueue
         Self.loadQueue.async { [weak self] in
             let trimmed = Self.loadTrimmedBuffer(url: url)
-            DispatchQueue.main.async {
+            callbackQueue.async {
                 guard let self else { return }
                 self.isLoading = false
                 guard let trimmed else {
@@ -117,8 +125,8 @@ final class GaplessLoopPlayer: NotificationSoundPlaying {
         if loops {
             node.scheduleBuffer(buffer, at: nil, options: .loops)
         } else {
-            node.scheduleBuffer(buffer, at: nil) { [weak self] in
-                DispatchQueue.main.async { self?.wantsPlaying = false }
+            node.scheduleBuffer(buffer, at: nil) { [weak self, callbackQueue] in
+                callbackQueue.async { self?.wantsPlaying = false }
             }
         }
         node.play()

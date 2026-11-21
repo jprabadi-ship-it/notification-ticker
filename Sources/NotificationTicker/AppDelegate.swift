@@ -15,15 +15,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// 流したメッセージの記録。/tmp に置き、Mac の再起動で消える。
     private let history = DisplayHistory()
     private lazy var historyController = HistoryWindowController(history: history)
-    private var activeSound: NotificationSoundPlaying?
-    private var activeSoundSelection: String?
-    /// いまの再生部品を、すき間なしループ用として作ったか。
-    private var activeSoundWantsGapless = false
+    /// 通知音の再生。音声サービスが応答しなくなっても画面が止まらないよう、別の流れで鳴らす。
+    private let soundPlayback = SoundPlayback()
     /// 先頭メッセージに割り当てられた音。nil なら共通の通知音を使う。
     private var leadingSoundSelection: String?
     /// 先頭メッセージによるループの上書き。nil なら音源ごとの設定に従う。
     private var leadingSoundLoops: Bool?
-    private var soundFadeTimer: Timer?
     private var quietHoursTimer: Timer?
     private var isQuietHoursActive = false
     /// 地震の知らせ（緊急地震速報・地震情報）を出している間だけ、睡眠時間帯の停止を上書きする期限。
@@ -34,8 +31,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
     /// 先頭の項目が地震の知らせか。消音設定を越えて鳴らす。
     private var leadingSoundIsUrgent = false
-    /// 地震の音を鳴らす間だけ、Mac 本体の消音・小さすぎる音量を解く。
-    private let emergencyAudio = EmergencyAudioOverride(output: CoreAudioOutput())
     /// 地震の音の最低音量。アプリの音量を絞っていても、これより小さくはしない。
     static let urgentMinimumSoundVolume = 0.8
     /// 発信元をまたいで、同じ本文の24時間以内の再表示を防ぐ。
@@ -182,7 +177,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         // 地震の音のために解いた Mac 本体の消音を、終了時にも戻しておく。
-        emergencyAudio.end()
+        soundPlayback.restoreSystemOutput(timeout: 2)
         monitor.stop()
         feedMonitor.stop()
         earthquakeMonitor.stop()
@@ -412,9 +407,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard !isQuietHoursActive || isEmergencyOverrideActive else { return }
         // 試聴は利用者の操作なので、消音を越える扱いにしない。
         let urgent = overriding == nil && leadingSoundIsUrgent
-        if urgent { emergencyAudio.begin() } else { emergencyAudio.end() }
-        soundFadeTimer?.invalidate()
-        soundFadeTimer = nil
         let selection = overriding ?? leadingSoundSelection ?? settings.soundSelection
         // ループは、先頭メッセージに上書きがあればそれを、無ければ音源ごとの設定に従う。
         // 試聴（overriding 指定）のときは上書きを無視する。
@@ -422,72 +414,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let shouldLoop = looping && (itemLoops ?? settings.loopsSound(selection))
         // 取り込んだ音声ファイルをループするときは、継ぎ目に空白が出ないよう専用の部品で鳴らす。
         let wantsGapless = shouldLoop && selection.hasPrefix("file:")
-        if activeSoundSelection != selection || activeSoundWantsGapless != wantsGapless {
-            activeSound?.stop()
-            activeSound = makeSound(for: selection, gapless: wantsGapless)
-            activeSoundSelection = selection
-            activeSoundWantsGapless = wantsGapless
-        }
-        if let activeSound {
-            activeSound.volume = soundVolume(urgent: urgent)
-            if shouldLoop && activeSound.isPlaying && activeSound.loops {
-                return
-            }
-            activeSound.stop()
-            activeSound.loops = shouldLoop
-            activeSound.play()
-        } else {
-            NSSound.beep()
-        }
+        // 実際に鳴らすのは別の流れ。音声サービスが応答しなくても、ここで待たない。
+        soundPlayback.play(
+            selection: selection,
+            loops: shouldLoop,
+            gapless: wantsGapless,
+            volume: soundVolume(urgent: urgent),
+            urgent: urgent
+        )
     }
 
-    private func makeSound(for selection: String, gapless: Bool) -> NotificationSoundPlaying? {
-        if selection.hasPrefix("file:") {
-            let path = String(selection.dropFirst("file:".count))
-            if gapless, let player = GaplessLoopPlayer(url: URL(fileURLWithPath: path)) {
-                return player
-            }
-            return NSSound(contentsOfFile: path, byReference: true)
-        }
-        let name = String(selection.dropFirst("system:".count))
-        return NSSound(named: NSSound.Name(name))
-    }
-
-    private func fadeOutNotificationSound(duration: TimeInterval = 0.45) {
-        guard let activeSound, activeSound.isPlaying else {
-            emergencyAudio.end()
-            return
-        }
-        soundFadeTimer?.invalidate()
-
-        let startedAt = ProcessInfo.processInfo.systemUptime
-        let startingVolume = activeSound.volume
-        let timer = Timer(timeInterval: 1.0 / 30.0, repeats: true) { [weak self, weak activeSound] timer in
-            guard let self, let activeSound else {
-                timer.invalidate()
-                return
-            }
-            let elapsed = ProcessInfo.processInfo.systemUptime - startedAt
-            let progress = min(1, elapsed / duration)
-            activeSound.volume = Float(Double(startingVolume) * (1 - progress))
-
-            if progress >= 1 {
-                timer.invalidate()
-                activeSound.stop()
-                activeSound.loops = false
-                activeSound.volume = Float(self.settings.soundVolume)
-                self.soundFadeTimer = nil
-                self.emergencyAudio.end()
-                // すき間なしループ用の部品は曲全体を展開して持つ（70秒で約27MB）。
-                // 鳴らし終えたら手放し、次に鳴らすときに読み直す。
-                if activeSound is GaplessLoopPlayer {
-                    self.activeSound = nil
-                    self.activeSoundSelection = nil
-                }
-            }
-        }
-        soundFadeTimer = timer
-        RunLoop.main.add(timer, forMode: .common)
+    private func fadeOutNotificationSound() {
+        soundPlayback.fadeOut(restoreVolume: Float(settings.soundVolume))
     }
 
     private func showFeedSettings() {
@@ -523,8 +461,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func applySettingsAndRuntimeState() {
         tickerController.applySettings()
         // 再生中の音にも音量変更を即時反映する（フェード中は触らない）。
-        if soundFadeTimer == nil {
-            activeSound?.volume = soundVolume(urgent: leadingSoundIsUrgent)
+        if !soundPlayback.isFading {
+            soundPlayback.setVolume(soundVolume(urgent: leadingSoundIsUrgent))
         }
         if !shouldPlayLeadingSound {
             fadeOutNotificationSound()
