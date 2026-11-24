@@ -104,7 +104,10 @@ enum NotificationTextParser {
             return CapturedNotification(appName: nil, title: nil, body: texts[0])
         }
         if texts.count == 2 {
-            return CapturedNotification(appName: texts[0], title: nil, body: texts[1])
+            // バナーの AX にはアプリ名が入らず、[見出し, 本文] の2つで届く（macOS 27.2 で確認）。
+            // 1つ目をアプリ名として捨てると「スケジュール済みタスクが完了しました」のような
+            // 見出しが消え、毎回同じ本文だけが流れて重複扱いにもなる。
+            return CapturedNotification(appName: nil, title: texts[0], body: texts[1])
         }
 
         return CapturedNotification(

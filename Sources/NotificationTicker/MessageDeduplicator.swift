@@ -13,7 +13,9 @@ final class MessageDeduplicator {
     /// だけだと、ニュースの見出し（「窓口での待ち時間」など）まで短い窓に落ちて
     /// 取得のたびに再表示されてしまった。
     private static let recurringMarkers = [
-        "許可待ち", "入力待ち", "実行待ち", "を待っています", "待機中", "waiting for", "waits for"
+        "許可待ち", "入力待ち", "実行待ち", "を待っています", "待機中", "waiting for", "waits for",
+        // Claude アプリのスケジュール済みタスクは、同じタスク名で何度も完了を知らせる。
+        "スケジュール済みタスク", "scheduled task"
     ]
 
     /// 繰り返し流したい通知かどうか。

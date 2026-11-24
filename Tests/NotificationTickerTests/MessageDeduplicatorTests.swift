@@ -79,6 +79,7 @@ final class MessageDeduplicatorTests: XCTestCase {
         XCTAssertFalse(MessageDeduplicator.isRecurring(headline))
         XCTAssertTrue(MessageDeduplicator.isRecurring("許可待ち: 通知ウィジェット"))
         XCTAssertTrue(MessageDeduplicator.isRecurring("Bash の実行を待っています"))
+        XCTAssertTrue(MessageDeduplicator.isRecurring("スケジュール済みタスクが完了しました  •  “【毎日】TapBar テスターのお礼下書き”"))
     }
 
     func testKeepsLongWindowForOrdinaryNotices() {

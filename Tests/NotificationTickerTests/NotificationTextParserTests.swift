@@ -15,6 +15,13 @@ final class NotificationTextParserTests: XCTestCase {
         XCTAssertEqual(result, CapturedNotification(appName: "メール", title: "件名", body: "本文"))
     }
 
+    func testTwoTextBannerKeepsTitle() {
+        // バナーの AX は [見出し, 本文] で、アプリ名は入らない。見出しを捨てない。
+        let result = NotificationTextParser.parse(["スケジュール済みタスクが完了しました", "“【毎日】TapBar テスターのお礼下書き”"])
+        XCTAssertEqual(result?.title, "スケジュール済みタスクが完了しました")
+        XCTAssertEqual(result?.tickerText, "スケジュール済みタスクが完了しました  •  “【毎日】TapBar テスターのお礼下書き”")
+    }
+
     func testRejectsEmptyContent() {
         XCTAssertNil(NotificationTextParser.parse([" ", "閉じる"]))
     }
