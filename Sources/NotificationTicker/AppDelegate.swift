@@ -35,8 +35,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     static let urgentMinimumSoundVolume = 0.8
     /// 発信元をまたいで、同じ本文の24時間以内の再表示を防ぐ。
     private let deduplicator = MessageDeduplicator()
-    /// 起動時に GitHub の最新リリースを確かめ、新しい版があれば聞いてから入れ替える。
-    private let updater = AppUpdater()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // 保存先の外にある登録済みMP3を、保存先へ集約してから各画面を組み立てる。
@@ -170,10 +168,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         presentPendingTestMessageIfAny()
         presentPendingEarthquakeTestIfAny()
         previewNHKAfterFeedBehaviorUpgradeIfNeeded()
-        // 起動直後の画面の組み立てやテスト表示を邪魔しないよう、少し待ってから確かめる。
-        DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
-            self?.updater.checkForUpdates(userInitiated: false)
-        }
+        // gigowat.com の台帳で新しい版を確かめ、あれば聞いてから入れ替える（共通部品 GigowatUpdater）。
+        GigowatUpdater.shared.checkOnLaunch(slug: "notification-ticker", delay: 5)
         if !monitor.isTrusted {
             settingsController.showWindow(nil)
             NSApp.activate(ignoringOtherApps: true)
@@ -228,8 +224,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.mainMenu = mainMenu
     }
 
-    @objc private func checkForUpdates() {
-        updater.checkForUpdates(userInitiated: true)
+    @MainActor @objc private func checkForUpdates() {
+        GigowatUpdater.shared.checkNow(slug: "notification-ticker")
     }
 
     private func configureStatusItem() {
